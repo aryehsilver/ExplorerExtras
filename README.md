@@ -118,6 +118,32 @@ swallows the matching key-up, so no application sees a dangling press.
 `HKCR\Folder\shell`, so it opens as a tab in the existing window rather than a
 new window, falling back to the default verb where that verb is absent.
 
+## What it looks like
+
+Hover a folder and its contents appear beside it. Hover a folder in that list
+and it cascades again, as deep as you like. Folders with nothing in them get no
+chevron, so the arrow never promises something that isn't there.
+
+![Subfolder tips cascading from C:\Windows\Boot](docs/subfolder-tip.png)
+
+Hover a file instead and you get a preview of it. Images use a shell thumbnail:
+
+![Image preview](docs/image-preview.png)
+
+Anything with a registered preview handler is hosted directly — the same
+component Explorer's own preview pane uses — so code and markup arrive
+syntax-highlighted and PDFs scroll:
+
+![Syntax-highlighted XML preview](docs/code-preview.png)
+
+Audio and video play, with elapsed time, a progress bar you can click to seek,
+and the time remaining counting down:
+
+![Audio preview with transport controls](docs/media-preview.png)
+
+Every preview footer carries the file's name, size, and when it was created and
+last modified.
+
 ## Build prerequisites
 
 Visual Studio 2026 is installed on this machine but the **C++ toolset is not**:
