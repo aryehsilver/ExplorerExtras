@@ -10,8 +10,10 @@ namespace ee {
 namespace {
 
 constexpr wchar_t kHighlightClassName[] = L"ExplorerExtras.Highlight";
-constexpr double kPeakAlpha = 110.0;  // at the leading edge, fading to nothing
-constexpr int kCornerRadiusDip = 8;   // matches the Windows 11 tab corner
+constexpr double kPeakAlpha = 110.0;  // tab tint, at the leading edge
+constexpr double kRowAlpha = 52.0;    // row tint, even across the whole row
+constexpr int kTabRadiusDip = 8;      // matches the Windows 11 tab corner
+constexpr int kRowRadiusDip = 4;      // matches a hovered row in the file list
 
 bool EnsureClass(HINSTANCE instance) {
     static bool registered = false;
@@ -39,14 +41,16 @@ void HighlightWindow::Hide() {
     bounds_ = RECT{};
 }
 
-void HighlightWindow::Show(HINSTANCE instance, const RECT& screen_rect) {
+void HighlightWindow::Show(HINSTANCE instance, const RECT& screen_rect, HighlightStyle style) {
     const int width = screen_rect.right - screen_rect.left;
     const int height = screen_rect.bottom - screen_rect.top;
     if (width <= 0 || height <= 0) {
         Hide();
         return;
     }
-    if (window_ && EqualRect(&bounds_, &screen_rect)) return;  // already where it belongs
+    // Already exactly where and how it belongs.
+    if (window_ && style_ == style && EqualRect(&bounds_, &screen_rect)) return;
+    style_ = style;
 
     if (!EnsureClass(instance)) return;
 
@@ -84,28 +88,47 @@ void HighlightWindow::Show(HINSTANCE instance, const RECT& screen_rect) {
     const int green = GetGValue(tint);
     const int blue = GetBValue(tint);
 
+    const bool tab = style == HighlightStyle::TabTrigger;
+
     std::vector<double> column_alpha(static_cast<size_t>(width));
     for (int x = 0; x < width; ++x) {
+        if (!tab) {
+            column_alpha[static_cast<size_t>(x)] = kRowAlpha;  // even across the row
+            continue;
+        }
         const double t = width > 1 ? static_cast<double>(x) / (width - 1) : 0.0;
         const double fade = (1.0 - t) * (1.0 - t);  // eased, so it lingers at the left
         column_alpha[static_cast<size_t>(x)] = kPeakAlpha * fade;
     }
 
-    // Windows 11 tabs are rounded at the top and square at the bottom, and the
-    // tint sits at the leading edge, so only the top-left corner needs cutting.
-    const double radius = MulDiv(kCornerRadiusDip, GetDpiForWindow(window_), 96);
+    // A tab is rounded at the top and square at the bottom, and its tint sits
+    // at the leading edge, so only the top-left corner needs cutting. A row is
+    // rounded on all four.
+    const UINT dpi = GetDpiForWindow(window_);
+    const double radius = MulDiv(tab ? kTabRadiusDip : kRowRadiusDip, dpi, 96);
 
     auto* pixels = static_cast<BYTE*>(bits);
     for (int y = 0; y < height; ++y) {
         for (int x = 0; x < width; ++x) {
             double alpha = column_alpha[static_cast<size_t>(x)];
 
-            if (radius > 0 && x < radius && y < radius) {
-                const double dx = radius - x - 0.5;
-                const double dy = radius - y - 0.5;
-                const double distance = std::sqrt(dx * dx + dy * dy);
-                // Fractional coverage at the edge, so the curve is not jagged.
-                alpha *= std::clamp(radius - distance + 0.5, 0.0, 1.0);
+            if (radius > 0) {
+                // Distance from the nearest rounded corner's centre, for
+                // whichever corners this style rounds.
+                const bool left = x < radius;
+                const bool right = !tab && x >= width - radius;
+                const bool upper = y < radius;
+                const bool lower = !tab && y >= height - radius;
+
+                if ((left || right) && (upper || lower)) {
+                    const double cx = left ? radius : width - radius;
+                    const double cy = upper ? radius : height - radius;
+                    const double dx = cx - x - 0.5;
+                    const double dy = cy - y - 0.5;
+                    const double distance = std::sqrt(dx * dx + dy * dy);
+                    // Fractional coverage at the edge, so the curve is smooth.
+                    alpha *= std::clamp(radius - distance + 0.5, 0.0, 1.0);
+                }
             }
 
             const BYTE a = static_cast<BYTE>(alpha);

@@ -1,7 +1,7 @@
 // NavigateUpFeature.h - double-click empty space in a folder view to go up.
 //
-// Features never talk to the host (tray app today, PowerToys module later).
-// They receive a gesture and act on the shell, nothing more.
+// Features never talk to the host. They receive a gesture and act on the shell,
+// nothing more, so the host can be swapped without touching them.
 #pragma once
 
 #include "../core/MouseHook.h"

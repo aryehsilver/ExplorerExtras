@@ -95,7 +95,7 @@ void SubfolderTipFeature::OnTick(POINT cursor, DWORD still_ms) {
 
     // The tint follows the pointer immediately, not after the dwell - it is
     // what explains why the drop-down is about to appear.
-    UpdateTabHighlight(cursor);
+    UpdateHighlight(cursor);
 
     if (chain_.empty() && !preview_.Visible()) {
         if (still_ms >= kDwellMs) TryOpenAt(cursor);
@@ -185,11 +185,16 @@ void SubfolderTipFeature::TryOpenAt(POINT cursor) {
     UpdateKeyboardCapture();
 }
 
-void SubfolderTipFeature::UpdateTabHighlight(POINT cursor) {
-    // While a tab's drop-down is open, keep its tint so the link between the
-    // two stays visible.
-    if (from_tab_ && !chain_.empty()) {
-        highlight_.Show(instance_, tab_zone_);
+void SubfolderTipFeature::UpdateHighlight(POINT cursor) {
+    // While anything is open, mark what it came from. The pointer has moved
+    // away into the popup by then, so Explorer's own hover highlight is gone
+    // and without this the source row looks unrelated to what is on screen.
+    if (!chain_.empty() || preview_.Visible()) {
+        if (from_tab_) {
+            highlight_.Show(instance_, tab_zone_, HighlightStyle::TabTrigger);
+        } else {
+            highlight_.Show(instance_, source_row_, HighlightStyle::Row);
+        }
         return;
     }
     if (!tester_ || !Config().subfolderTips.load(std::memory_order_relaxed)) {
@@ -224,7 +229,7 @@ void SubfolderTipFeature::UpdateTabHighlight(POINT cursor) {
         highlight_.Hide();
         return;
     }
-    highlight_.Show(instance_, zone);
+    highlight_.Show(instance_, zone, HighlightStyle::TabTrigger);
 }
 
 void SubfolderTipFeature::TryOpenTab(HWND frame, const HitResult& hit, const RECT& zone) {

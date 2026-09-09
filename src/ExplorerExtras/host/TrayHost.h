@@ -1,8 +1,7 @@
 // TrayHost.h - the standalone host: tray icon, settings menu, process lifetime.
 //
-// This is the only layer that would be replaced by a PowertoyModuleIface
-// implementation. It owns the hook and the worker; the features below it know
-// nothing about how they were started.
+// The only host-specific layer. It owns the hook and the worker; the features
+// below it know nothing about how they were started.
 #pragma once
 
 #include <windows.h>

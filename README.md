@@ -33,9 +33,8 @@ thing that notices the pointer *leaving* — no single event gives you that.
 Where a preview handler is registered for the type, that handler is hosted —
 the same `IPreviewHandler` Explorer's own preview pane uses. That is what makes
 a PDF scrollable and code syntax-highlighted: none of it is reimplemented here,
-it is whatever is already installed. PowerToys' `MonacoPreviewHandler` covers
-most code and text types, and brings VS Code's editor with it. Move the pointer
-into the preview to scroll it; it stays open while the pointer is inside.
+it is whatever is already installed. Move the pointer into the preview to
+scroll it; it stays open while the pointer is inside.
 
 **Audio and video** have no registered preview handler, so they are played
 directly through Media Foundation's `IMFMediaEngine` in windowed mode — video
@@ -67,10 +66,10 @@ same item never carries it — the verbs actually offered are `open pintohome �
 copyaspath cut copy link delete properties`, with no browser verbs at all.
 Handing the menu a site that vends `SID_SShellBrowser` does not change this.
 
-The only thing that would work is the undocumented `ITabWindowManager`, which is
-not something to ship in a module intended for PowerToys. The code attempts the
-verb anyway and falls back, so it will start working if the shell ever exposes
-it.
+The only thing that would work is the undocumented `ITabWindowManager`, and a
+feature that exists only as long as an undocumented interface does is not worth
+shipping. The code attempts the verb anyway and falls back, so it will start
+working if the shell ever exposes it.
 
 Otherwise it falls back to a shell thumbnail — images and video poster frames,
 which have no handler registered. Extraction runs on its own STA thread
@@ -126,6 +125,12 @@ chevron, so the arrow never promises something that isn't there.
 
 ![Subfolder tips cascading from C:\Windows\Boot](docs/subfolder-tip.png)
 
+Window tabs work the same way. Hover the leading third of an inactive tab and
+its folder drops down beneath it; that zone tints so it is obvious what opened
+it, and the rest of the tab stays an ordinary click target.
+
+![A window tab dropping down its folder](docs/tab-hover.png)
+
 Hover a file instead and you get a preview of it. Images use a shell thumbnail:
 
 ![Image preview](docs/image-preview.png)
@@ -175,8 +180,7 @@ binary.
 
 QTTabBar hooked Explorer from the inside: a band object loaded into
 `explorer.exe`, subclassing its windows. That is why it broke on Windows
-updates, and it is an automatic rejection for PowerToys. None of it is
-necessary.
+updates. None of it is necessary.
 
 Everything here runs out-of-process:
 
@@ -261,17 +265,14 @@ src/ExplorerExtras/
 shell; it does not know whether it was started by the tray app or by anything
 else.
 
-## Path to PowerToys
-
-Only `host/` is host-specific. Submitting upstream means adding a
-`PowertoyModuleIface` implementation beside `TrayHost` and letting the runner
-own enable/disable and settings — `core/` and `features/` move unchanged.
-`AutoStart` is dropped there, because the runner owns process lifetime.
-
 ## Where things live
 
-- Settings: `%LOCALAPPDATA%\ExplorerExtras\settings.ini`
-- Log: `%LOCALAPPDATA%\ExplorerExtras\ExplorerExtras.log` (capped at 1 MiB)
+Both sit next to the executable, falling back to
+`%LOCALAPPDATA%\ExplorerExtras` when that folder is not writable — an installed
+copy under Program Files, say.
+
+- Settings: `settings.ini`
+- Log: `ExplorerExtras.log` (capped at 1 MiB)
 - Auto-start: `HKCU\Software\Microsoft\Windows\CurrentVersion\Run`, value
   `ExplorerExtras`. On by default; toggle it from the tray menu.
 

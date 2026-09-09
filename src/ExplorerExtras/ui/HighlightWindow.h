@@ -9,6 +9,15 @@
 
 namespace ee {
 
+enum class HighlightStyle {
+    // Over the part of a tab that opens a drop-down: fades away to the right,
+    // top-left corner cut to the tab's own radius.
+    TabTrigger,
+    // Over the row a tip was opened from, so it stays visibly the source while
+    // the pointer is away in the popup: even tint, softly rounded.
+    Row,
+};
+
 class HighlightWindow {
 public:
     HighlightWindow() = default;
@@ -17,7 +26,7 @@ public:
     HighlightWindow(const HighlightWindow&) = delete;
     HighlightWindow& operator=(const HighlightWindow&) = delete;
 
-    void Show(HINSTANCE instance, const RECT& screen_rect);
+    void Show(HINSTANCE instance, const RECT& screen_rect, HighlightStyle style);
     void Hide();
     bool Visible() const { return window_ != nullptr; }
 
@@ -26,6 +35,7 @@ private:
 
     HWND window_ = nullptr;
     RECT bounds_{};
+    HighlightStyle style_ = HighlightStyle::TabTrigger;
 };
 
 }  // namespace ee

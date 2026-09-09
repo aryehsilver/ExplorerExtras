@@ -48,7 +48,7 @@ public:
 private:
     void TryOpenAt(POINT cursor);
     void TryOpenTab(HWND frame, const HitResult& hit, const RECT& zone);
-    void UpdateTabHighlight(POINT cursor);
+    void UpdateHighlight(POINT cursor);
     void OpenChild(size_t parent_depth, const std::wstring& folder_path, const RECT& anchor);
     void RequestPreview(const std::wstring& path, const RECT& anchor);
     void CloseFrom(size_t depth);
