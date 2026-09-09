@@ -36,6 +36,7 @@ Settings LoadSettings() {
     s.subfolderTips = ReadBool(path, L"SubfolderTips", s.subfolderTips);
     s.filePreviews = ReadBool(path, L"FilePreviews", s.filePreviews);
     s.mediaPlayback = ReadBool(path, L"MediaPlayback", s.mediaPlayback);
+    s.mediaAutoPlay = ReadBool(path, L"MediaAutoPlay", s.mediaAutoPlay);
     s.runAtStartup = ReadBool(path, L"RunAtStartup", s.runAtStartup);
     return s;
 }
@@ -48,6 +49,7 @@ void SaveSettings(const Settings& settings) {
     WriteBool(path, L"SubfolderTips", settings.subfolderTips);
     WriteBool(path, L"FilePreviews", settings.filePreviews);
     WriteBool(path, L"MediaPlayback", settings.mediaPlayback);
+    WriteBool(path, L"MediaAutoPlay", settings.mediaAutoPlay);
     WriteBool(path, L"RunAtStartup", settings.runAtStartup);
 }
 
@@ -62,6 +64,7 @@ void ApplyToConfig(const Settings& settings) {
     Config().subfolderTips.store(settings.subfolderTips, std::memory_order_relaxed);
     Config().filePreviews.store(settings.filePreviews, std::memory_order_relaxed);
     Config().mediaPlayback.store(settings.mediaPlayback, std::memory_order_relaxed);
+    Config().mediaAutoPlay.store(settings.mediaAutoPlay, std::memory_order_relaxed);
 }
 
 }  // namespace ee

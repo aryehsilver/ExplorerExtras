@@ -29,7 +29,8 @@ public:
     static bool IsVideo(const std::wstring& path);
     static bool IsMedia(const std::wstring& path) { return IsAudio(path) || IsVideo(path); }
 
-    bool Open(HWND parent, const RECT& rect, const std::wstring& path);
+    // |autoplay| false opens the file paused, waiting for the play button.
+    bool Open(HWND parent, const RECT& rect, const std::wstring& path, bool autoplay);
     void Close();
     bool IsOpen() const { return engine_ != nullptr; }
 

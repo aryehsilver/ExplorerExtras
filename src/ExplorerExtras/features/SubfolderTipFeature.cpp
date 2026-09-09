@@ -300,10 +300,11 @@ void SubfolderTipFeature::RequestPreview(const std::wstring& path, const RECT& a
     if (Config().mediaPlayback.load(std::memory_order_relaxed) && MediaPreview::IsMedia(path)) {
         LARGE_INTEGER start;
         QueryPerformanceCounter(&start);
-        const bool playing = preview_.ShowMedia(instance_, path, anchor);
-        EE_INFO(L"preview: media for '%s' playing=%d (%.0fms)", path.c_str(), playing ? 1 : 0,
-                ElapsedMs(start));
-        if (playing) return;
+        const bool autoplay = Config().mediaAutoPlay.load(std::memory_order_relaxed);
+        const bool opened = preview_.ShowMedia(instance_, path, anchor, autoplay);
+        EE_INFO(L"preview: media for '%s' opened=%d autoplay=%d (%.0fms)", path.c_str(),
+                opened ? 1 : 0, autoplay ? 1 : 0, ElapsedMs(start));
+        if (opened) return;
     }
 
     // A registered handler gives a scrollable PDF or syntax-highlighted code.

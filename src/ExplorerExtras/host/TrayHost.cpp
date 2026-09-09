@@ -147,7 +147,13 @@ void TrayHost::ShowContextMenu() {
     AppendMenuW(menu,
                 MF_STRING | (settings_.mediaPlayback ? MF_CHECKED : MF_UNCHECKED) |
                     (settings_.enabled && settings_.filePreviews ? MF_ENABLED : MF_GRAYED),
-                IDM_MEDIA_PLAYBACK, L"Play audio and video in previews");
+                IDM_MEDIA_PLAYBACK, L"Preview audio and video");
+    AppendMenuW(menu,
+                MF_STRING | (settings_.mediaAutoPlay ? MF_CHECKED : MF_UNCHECKED) |
+                    (settings_.enabled && settings_.filePreviews && settings_.mediaPlayback
+                         ? MF_ENABLED
+                         : MF_GRAYED),
+                IDM_MEDIA_AUTOPLAY, L"    Start playing on hover");
     AppendMenuW(menu, MF_SEPARATOR, 0, nullptr);
     AppendMenuW(menu, MF_STRING | (settings_.runAtStartup ? MF_CHECKED : MF_UNCHECKED),
                 IDM_RUN_AT_STARTUP, L"Start with Windows");
@@ -215,6 +221,11 @@ void TrayHost::OnCommand(UINT id) {
             ShellExecuteW(window_, nullptr, L"explorer.exe", args.c_str(), nullptr, SW_SHOWNORMAL);
             break;
         }
+
+        case IDM_MEDIA_AUTOPLAY:
+            settings_.mediaAutoPlay = !settings_.mediaAutoPlay;
+            PersistAndApply();
+            break;
 
         case IDM_RESET_PREVIEWS:
             PostMessageW(worker_.MessageWindow(), kMsgResetPreview, 0, 0);

@@ -40,7 +40,7 @@ public:
 
     // Plays an audio or video file. Nothing registers a preview handler for
     // media, so this drives Media Foundation directly.
-    bool ShowMedia(HINSTANCE instance, const std::wstring& path, const RECT& avoid);
+    bool ShowMedia(HINSTANCE instance, const std::wstring& path, const RECT& avoid, bool autoplay);
 
     // Full teardown: the window goes away.
     void Hide();

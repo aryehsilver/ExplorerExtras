@@ -317,7 +317,8 @@ bool PreviewWindow::ShowHandler(HINSTANCE instance, const std::wstring& path, co
     return true;
 }
 
-bool PreviewWindow::ShowMedia(HINSTANCE instance, const std::wstring& path, const RECT& avoid) {
+bool PreviewWindow::ShowMedia(HINSTANCE instance, const std::wstring& path, const RECT& avoid,
+                              bool autoplay) {
     Hide();
     if (!MediaPreview::IsMedia(path)) return false;
 
@@ -360,7 +361,7 @@ bool PreviewWindow::ShowMedia(HINSTANCE instance, const std::wstring& path, cons
         bitmap_ = art;
         bitmap_size_ = art_size;
         hosting_ = art == nullptr;
-        if (!media_.Open(window_, host, path)) {
+        if (!media_.Open(window_, host, path, autoplay)) {
             Hide();
             return false;
         }
@@ -381,7 +382,7 @@ bool PreviewWindow::ShowMedia(HINSTANCE instance, const std::wstring& path, cons
         }
 
         RECT child{0, 0, host.right - host.left, host.bottom - host.top};
-        if (!media_.Open(video_host_, child, path)) {
+        if (!media_.Open(video_host_, child, path, autoplay)) {
             Hide();
             return false;
         }

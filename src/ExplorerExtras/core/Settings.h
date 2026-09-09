@@ -11,6 +11,9 @@ struct Settings {
     bool subfolderTips = true;
     bool filePreviews = true;
     bool mediaPlayback = true;
+    // Only meaningful when mediaPlayback is on: whether hovering starts
+    // playback, or opens the preview paused waiting for the play button.
+    bool mediaAutoPlay = true;
     bool runAtStartup = true;
 };
 
@@ -26,6 +29,7 @@ struct RuntimeConfig {
     std::atomic<bool> subfolderTips{true};
     std::atomic<bool> filePreviews{true};
     std::atomic<bool> mediaPlayback{true};
+    std::atomic<bool> mediaAutoPlay{true};
 };
 
 RuntimeConfig& Config();

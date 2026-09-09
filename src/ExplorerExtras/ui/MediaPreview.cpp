@@ -99,7 +99,7 @@ bool MediaPreview::IsVideo(const std::wstring& path) {
     return ExtensionIn(path, kVideoExtensions, ARRAYSIZE(kVideoExtensions));
 }
 
-bool MediaPreview::Open(HWND parent, const RECT& rect, const std::wstring& path) {
+bool MediaPreview::Open(HWND parent, const RECT& rect, const std::wstring& path, bool autoplay) {
     Close();
     if (!EnsureMediaFoundation()) return false;
 
@@ -130,7 +130,9 @@ bool MediaPreview::Open(HWND parent, const RECT& rect, const std::wstring& path)
         return false;
     }
 
-    engine_->SetAutoPlay(TRUE);
+    // Without autoplay the source still loads, so the length and the transport
+    // strip are right and the first press of play starts immediately.
+    engine_->SetAutoPlay(autoplay ? TRUE : FALSE);
     engine_->SetVolume(kPreviewVolume);
 
     BSTR url = SysAllocString(path.c_str());
