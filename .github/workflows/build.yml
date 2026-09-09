@@ -1,0 +1,53 @@
+name: Build
+
+# Every push builds, so breakage shows up immediately. Pushing a v* tag also
+# publishes a release with the built binary attached.
+on:
+  push:
+    branches: [main]
+    tags: ['v*']
+  pull_request:
+    branches: [main]
+  workflow_dispatch:
+
+permissions:
+  contents: write # needed to create releases
+
+jobs:
+  build:
+    runs-on: windows-latest
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Add MSBuild to PATH
+        uses: microsoft/setup-msbuild@v2
+
+      - name: Build
+        shell: pwsh
+        run: |
+          # The project deliberately does not pin a platform toolset, so this
+          # picks up whatever the runner's Visual Studio provides.
+          msbuild ExplorerExtras.sln /nologo /v:minimal /m `
+            /p:Configuration=Release /p:Platform=x64
+
+      - name: Package
+        shell: pwsh
+        run: |
+          $version = if ($env:GITHUB_REF -like 'refs/tags/*') { $env:GITHUB_REF_NAME } else { 'dev' }
+          $name = "ExplorerExtras-$version-x64.zip"
+          Compress-Archive -Path build\x64\Release\ExplorerExtras.exe, README.md -DestinationPath $name
+          "PACKAGE=$name" | Out-File -FilePath $env:GITHUB_ENV -Append
+
+      - name: Upload build artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: ExplorerExtras-x64
+          path: ${{ env.PACKAGE }}
+
+      - name: Publish release
+        if: startsWith(github.ref, 'refs/tags/v')
+        shell: pwsh
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: gh release create $env:GITHUB_REF_NAME $env:PACKAGE --generate-notes --title $env:GITHUB_REF_NAME

@@ -1,0 +1,146 @@
+﻿<?xml version="1.0" encoding="utf-8"?>
+<Project DefaultTargets="Build" xmlns="http://schemas.microsoft.com/developer/msbuild/2003">
+  <ItemGroup Label="ProjectConfigurations">
+    <ProjectConfiguration Include="Debug|x64">
+      <Configuration>Debug</Configuration>
+      <Platform>x64</Platform>
+    </ProjectConfiguration>
+    <ProjectConfiguration Include="Release|x64">
+      <Configuration>Release</Configuration>
+      <Platform>x64</Platform>
+    </ProjectConfiguration>
+  </ItemGroup>
+
+  <PropertyGroup Label="Globals">
+    <VCProjectVersion>17.0</VCProjectVersion>
+    <ProjectGuid>{7C2B0A31-4E62-4C0B-9E71-5B7F1A2D9C40}</ProjectGuid>
+    <RootNamespace>ExplorerExtras</RootNamespace>
+    <ProjectName>ExplorerExtras</ProjectName>
+    <!-- Overridable, so a CI runner with a different SDK can build without
+         editing the project: /p:WindowsTargetPlatformVersion=... -->
+    <WindowsTargetPlatformVersion Condition="'$(WindowsTargetPlatformVersion)' == ''">10.0.22621.0</WindowsTargetPlatformVersion>
+  </PropertyGroup>
+
+  <Import Project="$(VCTargetsPath)\Microsoft.Cpp.Default.props" />
+
+  <PropertyGroup Label="Configuration">
+    <ConfigurationType>Application</ConfigurationType>
+    <!-- Track the installed VS rather than pinning a toolset (v145 on VS 2026,
+         v143 on VS 2022). Microsoft.Cpp.Default.props applies a legacy v100
+         fallback before Platform.Default.props publishes the real default, so
+         take DefaultPlatformToolset here, after that import. -->
+    <PlatformToolset Condition="'$(DefaultPlatformToolset)' != ''">$(DefaultPlatformToolset)</PlatformToolset>
+    <PlatformToolset Condition="'$(PlatformToolset)' == '' or '$(PlatformToolset)' == 'v100'">v145</PlatformToolset>
+    <CharacterSet>Unicode</CharacterSet>
+  </PropertyGroup>
+  <PropertyGroup Condition="'$(Configuration)'=='Debug'" Label="Configuration">
+    <UseDebugLibraries>true</UseDebugLibraries>
+  </PropertyGroup>
+  <PropertyGroup Condition="'$(Configuration)'=='Release'" Label="Configuration">
+    <UseDebugLibraries>false</UseDebugLibraries>
+    <WholeProgramOptimization>true</WholeProgramOptimization>
+  </PropertyGroup>
+
+  <Import Project="$(VCTargetsPath)\Microsoft.Cpp.props" />
+
+  <PropertyGroup>
+    <OutDir>$(SolutionDir)build\$(Platform)\$(Configuration)\</OutDir>
+    <IntDir>$(SolutionDir)build\obj\$(ProjectName)\$(Platform)\$(Configuration)\</IntDir>
+  </PropertyGroup>
+
+  <ItemDefinitionGroup>
+    <ClCompile>
+      <LanguageStandard>stdcpp20</LanguageStandard>
+      <WarningLevel>Level4</WarningLevel>
+      <ConformanceMode>true</ConformanceMode>
+      <MultiProcessorCompilation>true</MultiProcessorCompilation>
+      <PreprocessorDefinitions>UNICODE;_UNICODE;WIN32_LEAN_AND_MEAN;NOMINMAX;%(PreprocessorDefinitions)</PreprocessorDefinitions>
+    </ClCompile>
+    <Link>
+      <SubSystem>Windows</SubSystem>
+      <AdditionalDependencies>shell32.lib;ole32.lib;oleaut32.lib;user32.lib;gdi32.lib;comctl32.lib;dwmapi.lib;advapi32.lib;shlwapi.lib;uuid.lib;UIAutomationCore.lib;mfplat.lib;mfuuid.lib;%(AdditionalDependencies)</AdditionalDependencies>
+    </Link>
+    <Manifest>
+      <AdditionalManifestFiles>app.manifest</AdditionalManifestFiles>
+    </Manifest>
+  </ItemDefinitionGroup>
+
+  <ItemDefinitionGroup Condition="'$(Configuration)'=='Debug'">
+    <ClCompile>
+      <Optimization>Disabled</Optimization>
+    </ClCompile>
+  </ItemDefinitionGroup>
+
+  <ItemDefinitionGroup Condition="'$(Configuration)'=='Release'">
+    <ClCompile>
+      <Optimization>MaxSpeed</Optimization>
+      <FunctionLevelLinking>true</FunctionLevelLinking>
+      <IntrinsicFunctions>true</IntrinsicFunctions>
+    </ClCompile>
+    <Link>
+      <EnableCOMDATFolding>true</EnableCOMDATFolding>
+      <OptimizeReferences>true</OptimizeReferences>
+    </Link>
+  </ItemDefinitionGroup>
+
+  <ItemGroup>
+    <ClCompile Include="main.cpp" />
+    <ClCompile Include="core\DarkMode.cpp" />
+    <ClCompile Include="core\ExplorerSession.cpp" />
+    <ClCompile Include="core\KeyboardHook.cpp" />
+    <ClCompile Include="core\Logging.cpp" />
+    <ClCompile Include="core\MouseHook.cpp" />
+    <ClCompile Include="core\ThumbnailLoader.cpp" />
+    <ClCompile Include="core\Paths.cpp" />
+    <ClCompile Include="core\Settings.cpp" />
+    <ClCompile Include="core\ShellItems.cpp" />
+    <ClCompile Include="core\ShellMenu.cpp" />
+    <ClCompile Include="ui\HighlightWindow.cpp" />
+    <ClCompile Include="core\ViewHitTest.cpp" />
+    <ClCompile Include="core\Worker.cpp" />
+    <ClCompile Include="features\NavigateUpFeature.cpp" />
+    <ClCompile Include="features\SubfolderTipFeature.cpp" />
+    <ClCompile Include="ui\MediaPreview.cpp" />
+    <ClCompile Include="ui\PreviewHandlerHost.cpp" />
+    <ClCompile Include="ui\PreviewWindow.cpp" />
+    <ClCompile Include="ui\TipWindow.cpp" />
+    <ClCompile Include="host\AutoStart.cpp" />
+    <ClCompile Include="host\TrayHost.cpp" />
+  </ItemGroup>
+
+  <ItemGroup>
+    <ClInclude Include="resource.h" />
+    <ClInclude Include="core\DarkMode.h" />
+    <ClInclude Include="core\ExplorerSession.h" />
+    <ClInclude Include="core\KeyboardHook.h" />
+    <ClInclude Include="core\Logging.h" />
+    <ClInclude Include="core\MouseHook.h" />
+    <ClInclude Include="core\ThumbnailLoader.h" />
+    <ClInclude Include="core\Paths.h" />
+    <ClInclude Include="core\Settings.h" />
+    <ClInclude Include="core\ShellItems.h" />
+    <ClInclude Include="core\ShellMenu.h" />
+    <ClInclude Include="ui\HighlightWindow.h" />
+    <ClInclude Include="core\ViewHitTest.h" />
+    <ClInclude Include="core\Worker.h" />
+    <ClInclude Include="features\NavigateUpFeature.h" />
+    <ClInclude Include="features\SubfolderTipFeature.h" />
+    <ClInclude Include="ui\MediaPreview.h" />
+    <ClInclude Include="ui\PreviewHandlerHost.h" />
+    <ClInclude Include="ui\PreviewWindow.h" />
+    <ClInclude Include="ui\TipWindow.h" />
+    <ClInclude Include="host\AutoStart.h" />
+    <ClInclude Include="host\TrayHost.h" />
+  </ItemGroup>
+
+  <ItemGroup>
+    <ResourceCompile Include="app.rc" />
+  </ItemGroup>
+
+  <ItemGroup>
+    <None Include="app.manifest" />
+    <None Include="assets\app.ico" />
+  </ItemGroup>
+
+  <Import Project="$(VCTargetsPath)\Microsoft.Cpp.targets" />
+</Project>
