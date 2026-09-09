@@ -9,6 +9,8 @@ struct Settings {
     bool enabled = true;
     bool navigateUpOnDoubleClick = true;
     bool subfolderTips = true;
+    // Annotate folder rows with how many items they hold.
+    bool folderItemCounts = true;
     bool filePreviews = true;
     bool mediaPlayback = true;
     // Only meaningful when mediaPlayback is on: whether hovering starts
@@ -27,6 +29,7 @@ struct RuntimeConfig {
     std::atomic<bool> enabled{true};
     std::atomic<bool> navigateUpOnDoubleClick{true};
     std::atomic<bool> subfolderTips{true};
+    std::atomic<bool> folderItemCounts{true};
     std::atomic<bool> filePreviews{true};
     std::atomic<bool> mediaPlayback{true};
     std::atomic<bool> mediaAutoPlay{true};

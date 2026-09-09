@@ -174,8 +174,12 @@ void SubfolderTipFeature::TryOpenAt(POINT cursor) {
         return;
     }
 
+    LARGE_INTEGER enumerate_start;
+    QueryPerformanceCounter(&enumerate_start);
     bool truncated = false;
     std::vector<ShellEntry> entries = EnumerateFolder(child_path, kMaxEntries, &truncated);
+    EE_INFO(L"enumerated %zu entries of '%s' in %.0fms", entries.size(), child_path.c_str(),
+            ElapsedMs(enumerate_start));
     if (entries.empty() && !truncated) return;  // empty folder: nothing to show
 
     auto tip = std::make_unique<TipWindow>();

@@ -19,6 +19,13 @@ struct ShellEntry {
     // Folders only. An empty folder gets no expand chevron, because offering to
     // open something with nothing in it is a lie.
     bool has_children = false;
+    // Immediate children, not recursive. counted is false where we did not
+    // look (a network path); capped is true where we stopped early, so the
+    // figures shown are a floor rather than a total.
+    bool counted = false;
+    bool capped = false;
+    int child_folders = 0;
+    int child_files = 0;
     int icon_index = -1;  // index into SystemSmallImageList()
 };
 
@@ -39,6 +46,11 @@ std::vector<ShellEntry> EnumerateFolder(const std::wstring& folder_path, size_t 
                                         bool* truncated);
 
 // The shared system small-icon image list. Never destroy it.
+// The count annotation for a folder row: "3 folders, 12 files", or
+// "2000+ items" where counting was cut short. Empty for files, for folders we
+// did not count, and for empty folders.
+std::wstring DescribeChildCount(const ShellEntry& entry);
+
 // Shell thumbnail for a file, or null when it has none. Caller owns the bitmap.
 // Synchronous, so only for things known to be quick — embedded album art is,
 // video frames are not (those go through ThumbnailLoader).

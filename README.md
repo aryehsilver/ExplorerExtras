@@ -80,6 +80,15 @@ down a list discards the ones overtaken on the way.
 Both are independently switchable from the tray: subfolder tips and file
 previews are separate toggles.
 
+Those counts are **immediate children only, never recursive**. A recursive total
+means walking a whole tree, which is why Explorer itself shows no folder size in
+a details view. Counting also stops at 2000 entries per folder and reports
+"2000+ items", so one enormous folder cannot hold up a tip: listing `C:\Windows`
+costs 192ms with counting against 13ms for an ordinary folder, and without the
+cap it would be far worse. Switch the counts off and the cost disappears
+entirely — the code then only asks whether a folder is empty, which stops at its
+first entry.
+
 **Window tabs** get the same treatment: hovering the **leading third** of a tab
 drops its folder's contents down beneath it. Only that third, so moving across a
 tab on the way to clicking it does nothing; and never the active tab, which is
@@ -121,7 +130,9 @@ new window, falling back to the default verb where that verb is absent.
 
 Hover a folder and its contents appear beside it. Hover a folder in that list
 and it cascades again, as deep as you like. Folders with nothing in them get no
-chevron, so the arrow never promises something that isn't there.
+chevron, so the arrow never promises something that isn't there. Each folder is
+annotated with what it holds — "8 folders, 1 file" — so a busy folder is
+obvious before you open it.
 
 ![Subfolder tips cascading from C:\Windows\Boot](docs/subfolder-tip.png)
 

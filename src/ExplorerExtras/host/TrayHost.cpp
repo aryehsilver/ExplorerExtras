@@ -141,6 +141,10 @@ void TrayHost::ShowContextMenu() {
                     (settings_.enabled ? MF_ENABLED : MF_GRAYED),
                 IDM_SUBFOLDER_TIPS, L"Subfolder tips on hover");
     AppendMenuW(menu,
+                MF_STRING | (settings_.folderItemCounts ? MF_CHECKED : MF_UNCHECKED) |
+                    (settings_.enabled && settings_.subfolderTips ? MF_ENABLED : MF_GRAYED),
+                IDM_FOLDER_COUNTS, L"    Show item counts on folders");
+    AppendMenuW(menu,
                 MF_STRING | (settings_.filePreviews ? MF_CHECKED : MF_UNCHECKED) |
                     (settings_.enabled ? MF_ENABLED : MF_GRAYED),
                 IDM_FILE_PREVIEWS, L"File previews on hover");
@@ -190,6 +194,11 @@ void TrayHost::OnCommand(UINT id) {
 
         case IDM_SUBFOLDER_TIPS:
             settings_.subfolderTips = !settings_.subfolderTips;
+            PersistAndApply();
+            break;
+
+        case IDM_FOLDER_COUNTS:
+            settings_.folderItemCounts = !settings_.folderItemCounts;
             PersistAndApply();
             break;
 

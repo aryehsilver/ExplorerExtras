@@ -34,6 +34,7 @@ Settings LoadSettings() {
     s.enabled = ReadBool(path, L"Enabled", s.enabled);
     s.navigateUpOnDoubleClick = ReadBool(path, L"NavigateUpOnDoubleClick", s.navigateUpOnDoubleClick);
     s.subfolderTips = ReadBool(path, L"SubfolderTips", s.subfolderTips);
+    s.folderItemCounts = ReadBool(path, L"FolderItemCounts", s.folderItemCounts);
     s.filePreviews = ReadBool(path, L"FilePreviews", s.filePreviews);
     s.mediaPlayback = ReadBool(path, L"MediaPlayback", s.mediaPlayback);
     s.mediaAutoPlay = ReadBool(path, L"MediaAutoPlay", s.mediaAutoPlay);
@@ -47,6 +48,7 @@ void SaveSettings(const Settings& settings) {
     WriteBool(path, L"Enabled", settings.enabled);
     WriteBool(path, L"NavigateUpOnDoubleClick", settings.navigateUpOnDoubleClick);
     WriteBool(path, L"SubfolderTips", settings.subfolderTips);
+    WriteBool(path, L"FolderItemCounts", settings.folderItemCounts);
     WriteBool(path, L"FilePreviews", settings.filePreviews);
     WriteBool(path, L"MediaPlayback", settings.mediaPlayback);
     WriteBool(path, L"MediaAutoPlay", settings.mediaAutoPlay);
@@ -62,6 +64,7 @@ void ApplyToConfig(const Settings& settings) {
     Config().enabled.store(settings.enabled, std::memory_order_relaxed);
     Config().navigateUpOnDoubleClick.store(settings.navigateUpOnDoubleClick, std::memory_order_relaxed);
     Config().subfolderTips.store(settings.subfolderTips, std::memory_order_relaxed);
+    Config().folderItemCounts.store(settings.folderItemCounts, std::memory_order_relaxed);
     Config().filePreviews.store(settings.filePreviews, std::memory_order_relaxed);
     Config().mediaPlayback.store(settings.mediaPlayback, std::memory_order_relaxed);
     Config().mediaAutoPlay.store(settings.mediaAutoPlay, std::memory_order_relaxed);

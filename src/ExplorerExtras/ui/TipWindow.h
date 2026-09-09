@@ -94,6 +94,7 @@ private:
     int pad_ = 8;
     int text_left_ = 32;
     int chevron_ = 16;
+    int count_column_ = 0;  // width reserved for the folder item counts
     int visible_rows_ = 0;
     int scroll_ = 0;
     int hover_ = -1;

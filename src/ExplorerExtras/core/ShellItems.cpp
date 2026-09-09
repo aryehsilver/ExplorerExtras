@@ -7,8 +7,10 @@
 #include <wrl/client.h>
 
 #include <algorithm>
+#include <cstdio>
 
 #include "Logging.h"
+#include "Settings.h"
 
 using Microsoft::WRL::ComPtr;
 
@@ -23,6 +25,45 @@ std::wstring DisplayNameOf(IShellItem* item, SIGDN form) {
     return value;
 }
 
+// Counting stops here. A handful of folders on any machine hold six figures of
+// entries, and a tip listing hundreds of folders must not pay for that; past
+// this point the exact number tells the user nothing anyway.
+constexpr int kMaxCountedChildren = 2000;
+
+// Immediate children only. Recursive totals were considered and rejected: they
+// mean walking whole trees, which is why Explorer itself does not show folder
+// sizes in a details view.
+void CountChildren(const std::wstring& path, ShellEntry* entry) {
+    std::wstring pattern = path;
+    if (pattern.empty()) return;
+    if (pattern.back() != L'\\') pattern += L'\\';
+    pattern += L'*';
+
+    WIN32_FIND_DATAW found{};
+    const HANDLE search = FindFirstFileExW(pattern.c_str(), FindExInfoBasic, &found,
+                                           FindExSearchNameMatch, nullptr, 0);
+    if (search == INVALID_HANDLE_VALUE) return;
+
+    entry->counted = true;
+    do {
+        const wchar_t* name = found.cFileName;
+        if (name[0] == L'.' && (name[1] == L'\0' || (name[1] == L'.' && name[2] == L'\0'))) continue;
+
+        if (found.dwFileAttributes & FILE_ATTRIBUTE_DIRECTORY) {
+            ++entry->child_folders;
+        } else {
+            ++entry->child_files;
+        }
+
+        if (entry->child_folders + entry->child_files >= kMaxCountedChildren) {
+            entry->capped = true;
+            break;
+        }
+    } while (FindNextFileW(search, &found));
+
+    FindClose(search);
+}
+
 int IconIndexFor(const std::wstring& path) {
     SHFILEINFOW info{};
     const DWORD_PTR result = SHGetFileInfoW(path.c_str(), 0, &info, sizeof(info),
@@ -31,6 +72,28 @@ int IconIndexFor(const std::wstring& path) {
 }
 
 }  // namespace
+
+std::wstring DescribeChildCount(const ShellEntry& entry) {
+    if (!entry.is_folder || !entry.counted) return {};
+
+    const int folders = entry.child_folders;
+    const int files = entry.child_files;
+    if (folders + files == 0) return {};
+
+    wchar_t buffer[64];
+    if (entry.capped) {
+        // The breakdown would be misleading once counting stopped early.
+        _snwprintf_s(buffer, _TRUNCATE, L"%d+ items", folders + files);
+    } else if (folders > 0 && files > 0) {
+        _snwprintf_s(buffer, _TRUNCATE, L"%d %s, %d %s", folders,
+                     folders == 1 ? L"folder" : L"folders", files, files == 1 ? L"file" : L"files");
+    } else if (folders > 0) {
+        _snwprintf_s(buffer, _TRUNCATE, L"%d %s", folders, folders == 1 ? L"folder" : L"folders");
+    } else {
+        _snwprintf_s(buffer, _TRUNCATE, L"%d %s", files, files == 1 ? L"file" : L"files");
+    }
+    return buffer;
+}
 
 HBITMAP LoadThumbnail(const std::wstring& path, int max_edge) {
     ComPtr<IShellItemImageFactory> factory;
@@ -190,10 +253,19 @@ std::vector<ShellEntry> EnumerateFolder(const std::wstring& folder_path, size_t 
         entry.icon_index = entry.parsing_path.empty() ? -1 : IconIndexFor(entry.parsing_path);
 
         if (entry.is_folder && !entry.parsing_path.empty()) {
-            // One FindFirstFile per folder. Skipped for UNC paths, where the
-            // round trip is not worth it just to decide whether to draw an arrow.
+            // One directory pass per folder. Skipped for UNC paths, where the
+            // round trip is not worth it just to annotate a row.
             const bool unc = entry.parsing_path.rfind(L"\\\\", 0) == 0;
-            entry.has_children = unc || !PathIsDirectoryEmptyW(entry.parsing_path.c_str());
+            if (unc) {
+                entry.has_children = true;  // assume so rather than pay to find out
+            } else if (Config().folderItemCounts.load(std::memory_order_relaxed)) {
+                CountChildren(entry.parsing_path, &entry);
+                entry.has_children = entry.child_folders + entry.child_files > 0;
+            } else {
+                // Not showing counts: only ever ask whether it is empty, which
+                // stops at the first entry instead of reading the directory.
+                entry.has_children = !PathIsDirectoryEmptyW(entry.parsing_path.c_str());
+            }
         }
 
         entries.push_back(std::move(entry));

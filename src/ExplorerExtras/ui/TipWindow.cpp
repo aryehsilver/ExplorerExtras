@@ -18,6 +18,8 @@ constexpr UINT kExpandDelayMs = 250;
 constexpr int kMaxRows = 28;
 constexpr int kMinWidthDip = 140;
 constexpr int kMaxWidthDip = 420;
+constexpr int kMaxWidthWithCountsDip = 560;
+constexpr int kCountGapDip = 20;
 
 int Scale(int dip, UINT dpi) {
     return MulDiv(dip, static_cast<int>(dpi), 96);
@@ -87,18 +89,34 @@ SIZE TipWindow::Measure(const RECT& work_area) {
     row_height_ = std::max<int>(Scale(icon_size_, dpi_) + Scale(6, dpi_), tm.tmHeight + Scale(8, dpi_));
 
     int widest = 0;
+    int widest_count = 0;
     for (const auto& entry : entries_) {
         SIZE extent{};
         GetTextExtentPoint32W(dc, entry.display_name.c_str(),
                               static_cast<int>(entry.display_name.size()), &extent);
         widest = std::max(widest, static_cast<int>(extent.cx));
+
+        const std::wstring count = DescribeChildCount(entry);
+        if (count.empty()) continue;
+        SIZE count_extent{};
+        GetTextExtentPoint32W(dc, count.c_str(), static_cast<int>(count.size()), &count_extent);
+        widest_count = std::max(widest_count, static_cast<int>(count_extent.cx));
     }
 
     SelectObject(dc, previous);
     ReleaseDC(window_, dc);
 
-    const int width = std::clamp(text_left_ + widest + chevron_ + pad_, Scale(kMinWidthDip, dpi_),
-                                 Scale(kMaxWidthDip, dpi_));
+    // A couple of pixels of slack: GetTextExtentPoint32W and DrawTextW do not
+    // agree to the pixel, and an exactly-sized column ellipsises a name that
+    // would otherwise fit.
+    widest += Scale(6, dpi_);
+    count_column_ = widest_count;
+    const int gap = widest_count > 0 ? Scale(kCountGapDip, dpi_) : 0;
+    // Allow a wider tip when there is a second column, so names are not
+    // squeezed into ellipses to make room for the counts.
+    const int max_width = Scale(widest_count > 0 ? kMaxWidthWithCountsDip : kMaxWidthDip, dpi_);
+    const int width = std::clamp(text_left_ + widest + gap + widest_count + chevron_ + pad_,
+                                 Scale(kMinWidthDip, dpi_), max_width);
 
     const int room = (work_area.bottom - work_area.top) / std::max(row_height_, 1) - 1;
     const int rows = static_cast<int>(entries_.size()) + (truncated_ ? 1 : 0);
@@ -325,12 +343,24 @@ void TipWindow::OnPaint() {
                            row.top + (row_height_ - Scale(icon_size_, dpi_)) / 2, ILD_TRANSPARENT);
         }
 
+        const std::wstring count = DescribeChildCount(entry);
+
         SetTextColor(memory, palette.text);
         RECT text = row;
         text.left += text_left_;
         text.right -= chevron_ + pad_;
+        if (count_column_ > 0) text.right -= count_column_ + Scale(kCountGapDip, dpi_);
         DrawTextW(memory, entry.display_name.c_str(), -1, &text,
                   DT_SINGLELINE | DT_VCENTER | DT_END_ELLIPSIS | DT_NOPREFIX);
+
+        if (!count.empty()) {
+            SetTextColor(memory, palette.dim);
+            RECT counts = row;
+            counts.right = client.right - pad_ - chevron_;
+            counts.left = counts.right - count_column_;
+            DrawTextW(memory, count.c_str(), -1, &counts,
+                      DT_SINGLELINE | DT_VCENTER | DT_RIGHT | DT_NOPREFIX);
+        }
 
         if (entry.is_folder && entry.has_children) {
             // A small chevron, drawn rather than glyphed so it needs no font.
