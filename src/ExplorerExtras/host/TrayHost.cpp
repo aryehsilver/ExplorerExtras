@@ -151,6 +151,7 @@ void TrayHost::ShowContextMenu() {
     AppendMenuW(menu, MF_SEPARATOR, 0, nullptr);
     AppendMenuW(menu, MF_STRING | (settings_.runAtStartup ? MF_CHECKED : MF_UNCHECKED),
                 IDM_RUN_AT_STARTUP, L"Start with Windows");
+    AppendMenuW(menu, MF_STRING, IDM_RESET_PREVIEWS, L"Reset file previews");
     AppendMenuW(menu, MF_STRING, IDM_OPEN_LOG, L"Show log file in Explorer");
     AppendMenuW(menu, MF_STRING, IDM_COPY_LOG_PATH, L"Copy log path");
     AppendMenuW(menu, MF_STRING, IDM_DIAGNOSTICS, L"Log element under pointer\tin 3s");
@@ -214,6 +215,11 @@ void TrayHost::OnCommand(UINT id) {
             ShellExecuteW(window_, nullptr, L"explorer.exe", args.c_str(), nullptr, SW_SHOWNORMAL);
             break;
         }
+
+        case IDM_RESET_PREVIEWS:
+            PostMessageW(worker_.MessageWindow(), kMsgResetPreview, 0, 0);
+            ShowBalloon(kAppTitle, L"File previews reset. The next preview starts fresh.");
+            break;
 
         case IDM_COPY_LOG_PATH: {
             // Guaranteed fallback: revealing the file depends on the shell

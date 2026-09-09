@@ -43,6 +43,12 @@ public:
     void OnThumbnail(uint64_t token, HBITMAP bitmap);
 
     void Dismiss();
+
+    // Releases the retained preview handler so the next preview starts a fresh
+    // one. Recovery for the case where the handler itself has wedged, which we
+    // cannot detect from the outside - its calls all still succeed.
+    void ResetPreviewHandler();
+
     bool IsShowing() const { return !chain_.empty(); }
 
 private:

@@ -33,12 +33,18 @@ if (-not $msbuild) { throw "MSBuild.exe not found in any Visual Studio installat
 $exe = Join-Path $root "build\x64\$Configuration\ExplorerExtras.exe"
 
 # A running instance holds a lock on the output file.
+#
+# Give it time to close properly. It holds a reference to an out-of-process
+# preview handler, and killing it outright orphans that process - which then
+# lingers and can leave later previews stuck on their loading screen.
 Get-Process ExplorerExtras -ErrorAction SilentlyContinue | ForEach-Object {
     Write-Host "Stopping running instance (pid $($_.Id))..." -ForegroundColor Yellow
     $_.CloseMainWindow() | Out-Null
-    Start-Sleep -Milliseconds 500
-    if (-not $_.HasExited) { $_.Kill() }
-    $_.WaitForExit(5000) | Out-Null
+    if (-not $_.WaitForExit(6000)) {
+        Write-Host "  did not exit in time; killing" -ForegroundColor Red
+        $_.Kill()
+        $_.WaitForExit(5000) | Out-Null
+    }
 }
 
 & $msbuild (Join-Path $root 'ExplorerExtras.sln') `

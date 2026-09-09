@@ -28,11 +28,21 @@ public:
 
     bool Open(HWND parent, const RECT& rect, const std::wstring& path);
     void Resize(const RECT& rect);
+
+    // Drops the current document but keeps the handler object alive, so the
+    // next preview of the same type reuses it. Use this between previews.
+    void Unload();
+
+    // Releases the handler entirely. Only at shutdown, or when the next file
+    // needs a different handler.
     void Close();
+
     bool IsOpen() const { return handler_ != nullptr; }
 
 private:
     Microsoft::WRL::ComPtr<IPreviewHandler> handler_;
+    CLSID clsid_{};      // which handler handler_ is
+    bool loaded_ = false;  // whether it currently holds a document
 };
 
 }  // namespace ee

@@ -9,6 +9,7 @@
 #include <cstdio>
 #include <cstdlib>
 
+#include "../core/Logging.h"
 #include "../core/ShellItems.h"
 
 namespace ee {
@@ -55,6 +56,10 @@ int Scale(int dip, UINT dpi) {
     return MulDiv(dip, static_cast<int>(dpi), 96);
 }
 
+// Measured, not assumed: none of WS_EX_NOACTIVATE, WS_EX_TOPMOST or
+// WS_EX_TOOLWINDOW has any bearing on whether a hosted preview renders. Each
+// was tested in isolation against a reproducible hang and made no difference.
+
 std::wstring FormatClock(double seconds) {
     if (!std::isfinite(seconds) || seconds < 0) return L"--:--";
     const int total = static_cast<int>(seconds);
@@ -95,10 +100,13 @@ void PreviewWindow::Hide() {
     // Release the handler and stop playback before the window they drew into
     // goes away - otherwise audio keeps going after the preview disappears.
     if (window_) KillTimer(window_, kMediaTimerId);
-    handler_host_.Close();
+    // Unload, not Close: the handler object is kept alive between previews so
+    // the next file of the same type reuses it instead of restarting it.
+    handler_host_.Unload();
     media_.Close();  // must go before the window it renders into
     hosting_ = false;
     media_mode_ = false;
+    handler_mode_ = false;
 
     if (video_host_) {
         DestroyWindow(video_host_);
@@ -126,8 +134,23 @@ void PreviewWindow::Hide() {
     detail_.clear();
 }
 
+void PreviewWindow::Dismiss() {
+    if (window_ && handler_mode_) {
+        // Keep the window and the browser inside it; only drop the document.
+        handler_host_.Unload();
+        ShowWindow(window_, SW_HIDE);
+        return;
+    }
+    Hide();
+}
+
+void PreviewWindow::Shutdown() {
+    Hide();
+    handler_host_.Close();
+}
+
 bool PreviewWindow::ContainsPoint(POINT screen_pt) const {
-    if (!window_) return false;
+    if (!Visible()) return false;
     RECT rect{};
     GetWindowRect(window_, &rect);
     return PtInRect(&rect, screen_pt) != FALSE;
@@ -201,6 +224,13 @@ bool PreviewWindow::CreateFrame(HINSTANCE instance, const std::wstring& path, SI
     const int width = content_.cx + pad_ * 2;
     const int height = content_.cy + pad_ + controls_height_ + footer_height_;
 
+    const POINT at = PlaceBeside(avoid, width, height);
+    SetWindowPos(window_, HWND_TOPMOST, at.x, at.y, width, height, SWP_NOACTIVATE);
+    ShowWindow(window_, SW_SHOWNOACTIVATE);
+    return true;
+}
+
+POINT PreviewWindow::PlaceBeside(const RECT& avoid, int width, int height) const {
     MONITORINFO monitor{};
     monitor.cbSize = sizeof(monitor);
     const POINT probe{avoid.right, avoid.top};
@@ -214,10 +244,7 @@ bool PreviewWindow::CreateFrame(HINSTANCE instance, const std::wstring& path, SI
     int y = avoid.top;
     if (y + height > monitor.rcWork.bottom) y = monitor.rcWork.bottom - height;
     y = std::max<int>(y, monitor.rcWork.top);
-
-    SetWindowPos(window_, HWND_TOPMOST, x, y, width, height, SWP_NOACTIVATE);
-    ShowWindow(window_, SW_SHOWNOACTIVATE);
-    return true;
+    return POINT{x, y};
 }
 
 bool PreviewWindow::Show(HINSTANCE instance, HBITMAP bitmap, const std::wstring& path,
@@ -243,29 +270,50 @@ bool PreviewWindow::Show(HINSTANCE instance, HBITMAP bitmap, const std::wstring&
 }
 
 bool PreviewWindow::ShowHandler(HINSTANCE instance, const std::wstring& path, const RECT& avoid) {
-    Hide();
-
     CLSID clsid{};
-    if (!PreviewHandlerHost::FindHandler(path, &clsid)) return false;
+    if (!PreviewHandlerHost::FindHandler(path, &clsid)) {
+        Hide();
+        return false;
+    }
 
-    MONITORINFO monitor{};
-    monitor.cbSize = sizeof(monitor);
-    const POINT probe{avoid.right, avoid.top};
-    GetMonitorInfoW(MonitorFromPoint(probe, MONITOR_DEFAULTTONEAREST), &monitor);
+    if (window_ && handler_mode_) {
+        // A handler preview is already on screen. Keep the window - and with it
+        // the WebView2 the handler parked inside - and just retarget it. Every
+        // destroy/recreate re-parents that browser, which is what eventually
+        // leaves one stuck on its loading screen.
+        handler_host_.Unload();
+        caption_ = PathFindFileNameW(path.c_str());
+        detail_ = FileFactsLine(path);
 
-    const UINT dpi = GetDpiForSystem();
-    SIZE content{Scale(kHandlerWidthDip, dpi), Scale(kHandlerHeightDip, dpi)};
-    content.cx = std::min<LONG>(content.cx, (monitor.rcWork.right - monitor.rcWork.left) / 2);
-    content.cy = std::min<LONG>(content.cy, monitor.rcWork.bottom - monitor.rcWork.top - 120);
+        RECT current{};
+        GetWindowRect(window_, &current);
+        const POINT at =
+            PlaceBeside(avoid, current.right - current.left, current.bottom - current.top);
+        SetWindowPos(window_, HWND_TOPMOST, at.x, at.y, 0, 0, SWP_NOSIZE | SWP_NOACTIVATE);
+        ShowWindow(window_, SW_SHOWNOACTIVATE);  // it may have been dismissed
+        InvalidateRect(window_, nullptr, FALSE);
+    } else {
+        Hide();
 
-    if (!CreateFrame(instance, path, content, avoid, 0)) return false;
+        MONITORINFO monitor{};
+        monitor.cbSize = sizeof(monitor);
+        const POINT probe{avoid.right, avoid.top};
+        GetMonitorInfoW(MonitorFromPoint(probe, MONITOR_DEFAULTTONEAREST), &monitor);
 
-    const RECT host = ContentRect();
-    if (!handler_host_.Open(window_, host, path)) {
+        const UINT dpi = GetDpiForSystem();
+        SIZE content{Scale(kHandlerWidthDip, dpi), Scale(kHandlerHeightDip, dpi)};
+        content.cx = std::min<LONG>(content.cx, (monitor.rcWork.right - monitor.rcWork.left) / 2);
+        content.cy = std::min<LONG>(content.cy, monitor.rcWork.bottom - monitor.rcWork.top - 120);
+
+        if (!CreateFrame(instance, path, content, avoid, 0)) return false;
+    }
+
+    if (!handler_host_.Open(window_, ContentRect(), path)) {
         Hide();
         return false;
     }
     hosting_ = true;
+    handler_mode_ = true;
     return true;
 }
 

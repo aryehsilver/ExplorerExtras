@@ -42,9 +42,21 @@ public:
     // media, so this drives Media Foundation directly.
     bool ShowMedia(HINSTANCE instance, const std::wstring& path, const RECT& avoid);
 
+    // Full teardown: the window goes away.
     void Hide();
 
-    bool Visible() const { return window_ != nullptr; }
+    // Take the preview off screen. A handler preview is only hidden, keeping
+    // its window and the WebView2 inside it alive for the next one; anything
+    // else is torn down.
+    void Dismiss();
+
+    // Hide, and release the retained preview handler. Must run on the thread
+    // that created it, so it is called explicitly at shutdown rather than left
+    // to the destructor.
+    void Shutdown();
+
+    // A hidden-but-retained handler window does not count as visible.
+    bool Visible() const { return window_ != nullptr && IsWindowVisible(window_) != FALSE; }
     HWND Handle() const { return window_; }
     bool ContainsPoint(POINT screen_pt) const;
 
@@ -61,6 +73,9 @@ private:
     void OnClick(POINT client_pt);
     bool CreateFrame(HINSTANCE instance, const std::wstring& path, SIZE content, const RECT& avoid,
                      int controls_dip);
+    // Where a window of this size should sit next to |avoid|, flipping sides
+    // and nudging up when the monitor has no room.
+    POINT PlaceBeside(const RECT& avoid, int width, int height) const;
 
     RECT ContentRect() const;
     RECT ControlsRect() const;
@@ -83,8 +98,13 @@ private:
     std::wstring detail_;   // size, created, modified
 
     bool dark_ = false;
-    bool hosting_ = false;     // handler or media paints its own surface
-    bool media_mode_ = false;  // transport strip is live
+    bool hosting_ = false;       // handler or media paints its own surface
+    bool media_mode_ = false;    // transport strip is live
+    // Currently hosting a preview handler. Its window is then reused for the
+    // next handler preview rather than destroyed: these handlers park a
+    // WebView2 in it, and re-parenting that repeatedly is what leaves a
+    // preview stuck on its loading screen.
+    bool handler_mode_ = false;
 
     UINT dpi_ = 96;
     int pad_ = 8;

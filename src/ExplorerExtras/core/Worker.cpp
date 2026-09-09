@@ -168,6 +168,10 @@ LRESULT CALLBACK Worker::WndProc(HWND window, UINT message, WPARAM wparam, LPARA
                                              reinterpret_cast<HBITMAP>(lparam));
             return 0;
 
+        case kMsgResetPreview:
+            self->subfolder_tip_.ResetPreviewHandler();
+            return 0;
+
         case WM_TIMER:
             if (wparam == kTickTimerId) self->OnTick();
             return 0;

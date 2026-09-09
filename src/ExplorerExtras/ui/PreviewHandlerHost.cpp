@@ -35,16 +35,33 @@ bool PreviewHandlerHost::FindHandler(const std::wstring& path, CLSID* clsid) {
 }
 
 bool PreviewHandlerHost::Open(HWND parent, const RECT& rect, const std::wstring& path) {
-    Close();
-
     CLSID clsid{};
-    if (!FindHandler(path, &clsid)) return false;
-
-    HRESULT hr = CoCreateInstance(clsid, nullptr, CLSCTX_LOCAL_SERVER | CLSCTX_INPROC_SERVER,
-                                  IID_PPV_ARGS(&handler_));
-    if (FAILED(hr) || !handler_) {
-        EE_INFO(L"preview handler CoCreateInstance failed hr=0x%08X", hr);
+    if (!FindHandler(path, &clsid)) {
+        Close();
         return false;
+    }
+
+    // A different file type needs a different handler; the current one is of
+    // no further use.
+    if (handler_ && !IsEqualGUID(clsid, clsid_)) Close();
+
+    HRESULT hr = S_OK;
+
+    if (handler_) {
+        // Reuse it. Several of these handlers are WebView2-backed and take
+        // seconds to start; creating a fresh one per hover pays that every
+        // time, and tearing one down while it is still initialising is what
+        // leaves a preview stuck on its loading screen forever.
+        Unload();
+    } else {
+        hr = CoCreateInstance(clsid, nullptr, CLSCTX_LOCAL_SERVER | CLSCTX_INPROC_SERVER,
+                              IID_PPV_ARGS(&handler_));
+        if (FAILED(hr) || !handler_) {
+            EE_INFO(L"preview handler CoCreateInstance failed hr=0x%08X", hr);
+            return false;
+        }
+        clsid_ = clsid;
+        EE_INFO(L"preview handler created");
     }
 
     // Handlers implement exactly one of these three; try them in the order the
@@ -96,6 +113,7 @@ bool PreviewHandlerHost::Open(HWND parent, const RECT& rect, const std::wstring&
         Close();
         return false;
     }
+    loaded_ = true;
     return true;
 }
 
@@ -105,10 +123,18 @@ void PreviewHandlerHost::Resize(const RECT& rect) {
     handler_->SetRect(&bounds);
 }
 
+void PreviewHandlerHost::Unload() {
+    if (!handler_ || !loaded_) return;
+    handler_->Unload();
+    loaded_ = false;
+}
+
 void PreviewHandlerHost::Close() {
     if (!handler_) return;
     handler_->Unload();
     handler_.Reset();
+    clsid_ = CLSID{};
+    loaded_ = false;
 }
 
 }  // namespace ee

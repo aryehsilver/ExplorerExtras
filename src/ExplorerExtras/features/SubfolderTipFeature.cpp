@@ -67,6 +67,7 @@ void SubfolderTipFeature::Initialize(HINSTANCE instance, ViewHitTester* tester, 
 
 void SubfolderTipFeature::Shutdown() {
     Dismiss();
+    preview_.Shutdown();  // releases the retained handler on this thread
     thumbnails_.Stop();
 }
 
@@ -287,7 +288,9 @@ void SubfolderTipFeature::OpenChild(size_t parent_depth, const std::wstring& fol
 void SubfolderTipFeature::RequestPreview(const std::wstring& path, const RECT& anchor) {
     if (!Config().filePreviews.load(std::memory_order_relaxed)) return;
 
-    preview_.Hide();
+    // Deliberately not hidden here: ShowHandler reuses the window it is already
+    // in, and destroying it first would defeat that. Each path below takes the
+    // old preview down itself.
     ++preview_token_;  // anything still in flight is now stale
     preview_anchor_ = anchor;
     preview_path_ = path;
@@ -315,6 +318,9 @@ void SubfolderTipFeature::RequestPreview(const std::wstring& path, const RECT& a
         if (shown) return;
     }
 
+    // A thumbnail arrives asynchronously, so take whatever is on screen down
+    // now rather than leaving a stale preview up while it is fetched.
+    preview_.Hide();
     EE_INFO(L"preview: thumbnail for '%s' token=%llu", path.c_str(),
             static_cast<unsigned long long>(preview_token_));
     thumbnails_.Request(path, kPreviewEdge, preview_token_);
@@ -403,7 +409,7 @@ void SubfolderTipFeature::Wire(TipWindow* tip) {
     tip->SetHoverChangedCallback([this](TipWindow* source) {
         // Moving to a different row closes anything opened from the old one.
         CloseFrom(DepthOf(source) + 1);
-        preview_.Hide();
+        preview_.Dismiss();
         ++preview_token_;
         UpdateKeyboardCapture();
     });
@@ -473,9 +479,14 @@ void SubfolderTipFeature::OnExternalClick(POINT screen_pt) {
     Dismiss();
 }
 
+void SubfolderTipFeature::ResetPreviewHandler() {
+    preview_.Shutdown();
+    EE_INFO(L"preview handler released on request");
+}
+
 void SubfolderTipFeature::Dismiss() {
     chain_.clear();
-    preview_.Hide();
+    preview_.Dismiss();
     highlight_.Hide();
     ++preview_token_;
     source_row_ = RECT{};

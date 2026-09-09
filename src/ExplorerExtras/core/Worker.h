@@ -17,6 +17,7 @@ inline constexpr UINT kMsgGesture = WM_APP + 1;      // lParam = GestureEvent*
 inline constexpr UINT kMsgDiagnostics = WM_APP + 2;  // lParam = POINT*
 inline constexpr UINT kMsgKey = WM_APP + 3;          // wParam = virtual key code
 inline constexpr UINT kMsgThumbnail = WM_APP + 4;    // wParam = token, lParam = HBITMAP
+inline constexpr UINT kMsgResetPreview = WM_APP + 5;  // release the retained preview handler
 
 class Worker {
 public:
