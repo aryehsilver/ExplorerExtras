@@ -18,6 +18,8 @@
 
 namespace ee {
 
+class TipDropTarget;
+
 enum class TipPlacement {
     RightOf,  // beside a row, as a submenu would open
     Below,    // under a window tab, as a drop-down would
@@ -64,6 +66,7 @@ public:
     const RECT& AnchorRect() const { return anchor_; }
     bool ContainsPoint(POINT screen_pt) const;
     RECT RowRect(int index) const;  // screen coordinates
+    int RowAtScreen(POINT screen_pt) const;
 
     // Fired after a dwell when the pointer rests on a folder row.
     void SetExpandCallback(RowFn fn) { on_expand_ = std::move(fn); }
@@ -77,6 +80,17 @@ public:
     void SetContextMenuCallback(RowFn fn) { on_context_ = std::move(fn); }
     // Fired once the pointer has dragged a row past the system threshold.
     void SetDragCallback(RowFn fn) { on_drag_ = std::move(fn); }
+    // Fired when a drag has hovered a folder row long enough to open it, so a
+    // file can be carried down through the levels without letting go.
+    void SetSpringCallback(RowFn fn) { on_spring_ = std::move(fn); }
+    // Fired after something has been dropped on this tip.
+    void SetDroppedCallback(SelfFn fn) { on_dropped_ = std::move(fn); }
+
+    // Called by TipDropTarget as a drag moves across the window. |row| is the
+    // folder row that would take the drop, or -1 when it would go to the folder
+    // the tip is listing.
+    void SetDropState(bool dropping, int entry_index);
+    void NotifyDropped();
 
     void ClearHover();
 
@@ -142,8 +156,14 @@ private:
     RowFn on_activate_;
     RowFn on_context_;
     RowFn on_drag_;
+    RowFn on_spring_;
     SelfFn on_hover_changed_;
+    SelfFn on_dropped_;
     int pending_row_ = -1;
+
+    TipDropTarget* drop_target_ = nullptr;
+    bool dropping_ = false;
+    int drop_row_ = -1;
 
     POINT drag_origin_{};
     bool maybe_drag_ = false;

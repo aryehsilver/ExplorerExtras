@@ -10,6 +10,7 @@
 #include <string>
 
 #include "../core/Logging.h"
+#include "TipDropTarget.h"
 
 namespace ee {
 namespace {
@@ -17,6 +18,11 @@ namespace {
 constexpr wchar_t kTipClassName[] = L"ExplorerExtras.Tip";
 constexpr UINT_PTR kExpandTimerId = 1;
 constexpr UINT kExpandDelayMs = 250;
+constexpr UINT_PTR kSpringTimerId = 2;
+// Longer than the hover dwell: a drag pauses over a row on its way past far
+// more often than a pointer does, and opening a level under a drag by accident
+// puts a window between the user and where they were aiming.
+constexpr UINT kSpringDelayMs = 550;
 constexpr int kMaxRows = 28;
 constexpr int kMinWidthDip = 140;
 constexpr int kMaxWidthDip = 420;
@@ -48,9 +54,17 @@ Palette PaletteFor(bool dark) {
 
 TipWindow::~TipWindow() {
     if (window_) {
+        if (drop_target_) RevokeDragDrop(window_);
         SetWindowLongPtrW(window_, GWLP_USERDATA, 0);
         DestroyWindow(window_);
         window_ = nullptr;
+    }
+    if (drop_target_) {
+        // OLE can still be holding a reference from a drag in flight, so the
+        // object outlives the window and simply stops speaking for it.
+        drop_target_->Detach();
+        drop_target_->Release();
+        drop_target_ = nullptr;
     }
     if (font_) {
         DeleteObject(font_);
@@ -188,6 +202,16 @@ bool TipWindow::Create(HINSTANCE instance, std::vector<ShellEntry> entries, bool
     SetWindowPos(window_, HWND_TOPMOST, x, y, size.cx, size.cy, SWP_NOACTIVATE);
     ShowWindow(window_, SW_SHOWNOACTIVATE);
     footprint_ = RECT{x, y, x + size.cx, y + size.cy};
+
+    // A list of folders is a list of places things go, so it accepts drops.
+    drop_target_ = new TipDropTarget(this);
+    const HRESULT hr = RegisterDragDrop(window_, drop_target_);
+    if (FAILED(hr)) {
+        EE_INFO(L"RegisterDragDrop failed hr=0x%08X; this tip will not take drops", hr);
+        drop_target_->Detach();
+        drop_target_->Release();
+        drop_target_ = nullptr;
+    }
     return true;
 }
 
@@ -220,6 +244,31 @@ int TipWindow::RowAtClient(POINT client_pt) const {
     GetClientRect(window_, &client);
     if (client_pt.y >= client.bottom - footer_height_ - 1) return -1;  // the filter footer
     return EntryAt(scroll_ + (client_pt.y - 1) / std::max(row_height_, 1));
+}
+
+int TipWindow::RowAtScreen(POINT screen_pt) const {
+    if (!window_) return -1;
+    POINT client = screen_pt;
+    ScreenToClient(window_, &client);
+    return RowAtClient(client);
+}
+
+void TipWindow::SetDropState(bool dropping, int entry_index) {
+    if (dropping == dropping_ && entry_index == drop_row_) return;
+
+    dropping_ = dropping;
+    drop_row_ = entry_index;
+
+    // A drag resting on a folder opens it, the same as a pointer resting on
+    // one - but the drag keeps hold of what it is carrying.
+    KillTimer(window_, kSpringTimerId);
+    if (dropping_ && drop_row_ >= 0) SetTimer(window_, kSpringTimerId, kSpringDelayMs, nullptr);
+
+    InvalidateRect(window_, nullptr, FALSE);
+}
+
+void TipWindow::NotifyDropped() {
+    if (on_dropped_) on_dropped_(this);
 }
 
 int TipWindow::PositionOf(int entry_index) const {
@@ -468,7 +517,7 @@ void TipWindow::OnPaint() {
             entry.icon_index = entry.parsing_path.empty() ? -1 : IconIndexFor(entry.parsing_path);
         }
 
-        if (index == hover_) {
+        if (index == hover_ || index == drop_row_) {
             const HBRUSH highlight = CreateSolidBrush(palette.hover);
             FillRect(memory, &row, highlight);
             DeleteObject(highlight);
@@ -510,6 +559,19 @@ void TipWindow::OnPaint() {
             SelectObject(memory, old_pen);
             DeleteObject(pen);
         }
+    }
+
+    if (dropping_) {
+        // A drag is over the window. The row highlight says which folder would
+        // take it; this says the window itself is what would catch it, which
+        // matters when the pointer is on a file row or the padding and the drop
+        // would go to the folder being listed.
+        const HBRUSH accent = CreateSolidBrush(palette.text);
+        FrameRect(memory, &client, accent);
+        RECT inner = client;
+        InflateRect(&inner, -1, -1);
+        FrameRect(memory, &inner, accent);
+        DeleteObject(accent);
     }
 
     if (footer_height_ > 0) {
@@ -602,6 +664,12 @@ LRESULT CALLBACK TipWindow::WndProc(HWND window, UINT message, WPARAM wparam, LP
             return 0;
 
         case WM_TIMER:
+            if (wparam == kSpringTimerId) {
+                KillTimer(window, kSpringTimerId);
+                const int row = self->drop_row_;
+                if (self->dropping_ && row >= 0 && self->on_spring_) self->on_spring_(self, row);
+                return 0;
+            }
             if (wparam == kExpandTimerId) {
                 KillTimer(window, kExpandTimerId);
                 const int row = self->pending_row_;

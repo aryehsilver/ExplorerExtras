@@ -105,6 +105,26 @@ top-left corner is cut to the tab's own radius with fractional coverage so the
 curve is not jagged. `SetLayeredWindowAttributes` can only apply one alpha to a
 whole window, which is why it is not used here.
 
+**Dropping into a tip** works the other way round: pick a file up in the view,
+rest the pointer on a folder or a tab, and the tip opens under the drag. Resting
+on a folder row inside it springs that level open too, so a file can be carried
+down several levels and let go at the bottom - all without navigating anywhere
+or opening a second window. A folder row takes the drop itself; anywhere else in
+the tip drops into the folder the tip is listing.
+
+What a drop *means* is never decided here. `TipDropTarget` binds the row's own
+shell drop target (`IShellItem::BindToHandler` with `BHID_SFUIObject`) and
+forwards to it, so copy against move, what the modifier keys do, `.lnk` and
+`.zip` targets and every installed drop handler behave exactly as they do in
+Explorer. `IDropTargetHelper` keeps the source's drag image following the
+pointer across our window.
+
+Two things fall out of a drag being in progress. Previews are suppressed: a drop
+cannot land in one, and it would cover whatever the drag was heading for. And
+Explorer's automation provider stops naming its rows while it drags, so a hit
+test that comes back as a row with no name is retried a few times rather than
+written off - without that, the tip never opens mid-drag at all.
+
 **Leaving** is deliberately forgiving. The pointer travelling from a row to what
 that row opened rarely goes in a straight line, and an exact hit test makes the
 popup vanish mid-journey — the common way to lose a preview is to clip the

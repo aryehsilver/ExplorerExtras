@@ -67,6 +67,7 @@ private:
     void Activate(const ShellEntry& entry);
     void UpdateKeyboardCapture();
     void OnFilterKey(DWORD virtual_key);
+    void UpdateDragState(POINT cursor);
 
     HINSTANCE instance_ = nullptr;
     ViewHitTester* tester_ = nullptr;
@@ -82,10 +83,19 @@ private:
     // timer; without this the tip would dismiss itself out from under it.
     bool modal_ = false;
 
+    // Someone is dragging something, here or in Explorer. Tips still open, so
+    // a drag can walk down into a subfolder and drop there; previews do not,
+    // having nowhere for a drop to land and a habit of covering the target.
+    bool dragging_ = false;
+    bool button_down_ = false;
+    POINT button_origin_{};
+
     RECT source_row_{};         // the Explorer row that opened everything
     std::wstring source_path_;  // what that row points at
     ActiveTab source_tab_;      // the tab it came from; the site for "open in new tab"
     POINT last_probe_pt_{-1, -1};
+    int probe_attempts_ = 0;
+    bool probe_settled_ = false;
     DWORD outside_ms_ = 0;
     bool pending_dismiss_ = false;
 

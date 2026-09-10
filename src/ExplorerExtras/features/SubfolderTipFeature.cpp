@@ -27,6 +27,7 @@ constexpr size_t kMaxEntries = 300;
 // Only ever paid once per tip, and only for a folder big enough to truncate.
 constexpr size_t kMaxFilterEntries = 20000;
 constexpr int kPreviewEdge = 480;  // longest side of the thumbnail, in pixels
+constexpr int kMaxProbeAttempts = 8;
 
 // Only the leading part of a tab opens its drop-down, so the rest of the tab
 // stays a plain click target. The tinted zone shows which part that is.
@@ -140,14 +141,21 @@ void SubfolderTipFeature::OnTick(POINT cursor, DWORD still_ms) {
         return;
     }
 
+    UpdateDragState(cursor);
+
     // The tint follows the pointer immediately, not after the dwell - it is
     // what explains why the drop-down is about to appear.
     UpdateHighlight(cursor);
 
-    if (chain_.empty() && !preview_.Visible()) {
-        if (still_ms >= kDwellMs) TryOpenAt(cursor);
-        return;
+    // Resting anywhere in Explorer that is not one of our own windows opens
+    // what is under the pointer - including while something else is already
+    // showing, so moving along a list of files swaps the preview rather than
+    // waiting for the old one to time out first.
+    if (!PointerInsideChain(cursor) && !preview_.ContainsPoint(cursor) && still_ms >= kDwellMs) {
+        TryOpenAt(cursor);
     }
+
+    if (chain_.empty() && !preview_.Visible()) return;
 
     if (PointerInSafeZone(cursor)) {
         outside_ms_ = 0;
@@ -162,9 +170,16 @@ void SubfolderTipFeature::TryOpenAt(POINT cursor) {
     if (!tester_) return;
 
     // A stationary pointer keeps satisfying the dwell, so this runs on every
-    // tick. Probe each position once - a UIA hit test is not free.
-    if (cursor.x == last_probe_pt_.x && cursor.y == last_probe_pt_.y) return;
-    last_probe_pt_ = cursor;
+    // tick. Probe each position once - a UIA hit test is not free - and only
+    // go again where the answer was unusable.
+    if (cursor.x == last_probe_pt_.x && cursor.y == last_probe_pt_.y) {
+        if (probe_settled_) return;
+    } else {
+        last_probe_pt_ = cursor;
+        probe_attempts_ = 0;
+        probe_settled_ = false;
+    }
+    if (++probe_attempts_ >= kMaxProbeAttempts) probe_settled_ = true;
 
     const HWND under_cursor = WindowFromPoint(cursor);
     if (!under_cursor) return;
@@ -172,6 +187,8 @@ void SubfolderTipFeature::TryOpenAt(POINT cursor) {
     if (!IsExplorerWindow(frame)) return;
 
     const HitResult hit = tester_->Test(cursor);
+    // Anything except a row that would not give its name is a real answer.
+    if (hit.kind != ViewHit::Item || !hit.item_name.empty()) probe_settled_ = true;
 
     // A window tab drops its folder down, the same list, anchored beneath.
     if (hit.kind == ViewHit::Tab) {
@@ -184,7 +201,16 @@ void SubfolderTipFeature::TryOpenAt(POINT cursor) {
         return;
     }
 
-    if (hit.kind != ViewHit::Item || hit.item_name.empty()) return;
+    // A row whose name did not come back: Explorer's automation provider is
+    // busy, which it reliably is while a drag is under way, and the point is
+    // left open to the remaining attempts rather than written off after one.
+    if (hit.kind != ViewHit::Item || hit.item_name.empty()) {
+        if (hit.kind == ViewHit::Item && probe_settled_) {
+            EE_INFO(L"probe: the row at (%ld,%ld) would not name itself in %d attempts", cursor.x,
+                    cursor.y, probe_attempts_);
+        }
+        return;
+    }
 
     const auto tab = ResolveActiveTab(frame, FindTabWindow(under_cursor));
     if (!tab) return;
@@ -199,6 +225,13 @@ void SubfolderTipFeature::TryOpenAt(POINT cursor) {
         return;
     }
     if (child_path == source_path_) return;  // already showing for this row
+
+    // Something else is under the pointer now, so what is on screen belongs to
+    // where the pointer has been rather than where it is.
+    if (!chain_.empty() || preview_.Visible()) {
+        Dismiss();
+        last_probe_pt_ = cursor;  // Dismiss clears it, and this point is probed
+    }
     EE_INFO(L"hover: '%s' folder=%d", child_path.c_str(), is_folder ? 1 : 0);
 
     // The row reports its logical width, which can exceed the visible view, so
@@ -215,7 +248,9 @@ void SubfolderTipFeature::TryOpenAt(POINT cursor) {
     outside_ms_ = 0;
 
     if (!is_folder) {
-        RequestPreview(child_path, anchor);
+        // Mid-drag a preview is worse than nothing: a drop cannot land in one,
+        // and it would cover whatever the drag was heading for.
+        if (!dragging_) RequestPreview(child_path, anchor);
         return;
     }
 
@@ -234,6 +269,29 @@ void SubfolderTipFeature::TryOpenAt(POINT cursor) {
     Wire(tip.get());
     chain_.push_back(std::move(tip));
     UpdateKeyboardCapture();
+}
+
+// Watched rather than hooked: the mouse hook stays off the input path, and a
+// drag is only ever a button that went down somewhere and a pointer that has
+// since travelled. Whether it is a real OLE drag or a rubber-band selection
+// does not matter - neither wants a preview opening under it.
+void SubfolderTipFeature::UpdateDragState(POINT cursor) {
+    const bool held = (GetAsyncKeyState(VK_LBUTTON) & 0x8000) != 0;
+    if (!held) {
+        dragging_ = false;
+        button_down_ = false;
+        return;
+    }
+    if (!button_down_) {
+        button_down_ = true;
+        button_origin_ = cursor;
+        return;
+    }
+    if (!dragging_ && (std::abs(cursor.x - button_origin_.x) > GetSystemMetrics(SM_CXDRAG) ||
+                       std::abs(cursor.y - button_origin_.y) > GetSystemMetrics(SM_CYDRAG))) {
+        dragging_ = true;
+        EE_INFO(L"drag in progress: previews suppressed, tips still open");
+    }
 }
 
 void SubfolderTipFeature::UpdateHighlight(POINT cursor) {
@@ -292,6 +350,12 @@ void SubfolderTipFeature::TryOpenTab(HWND frame, const HitResult& hit, const REC
         return;
     }
     if (folder == source_path_) return;
+    if (!chain_.empty() || preview_.Visible()) {
+        POINT cursor{};
+        GetCursorPos(&cursor);
+        Dismiss();
+        last_probe_pt_ = cursor;  // Dismiss clears it, and this point is probed
+    }
 
     bool truncated = false;
     std::vector<ShellEntry> entries = EnumerateFolder(folder, kMaxEntries, &truncated);
@@ -542,6 +606,20 @@ void SubfolderTipFeature::Wire(TipWindow* tip) {
         modal_ = true;
         ShowShellContextMenu(source->Handle(), entry.parsing_path, cursor);
         modal_ = false;
+        pending_dismiss_ = true;
+    });
+
+    tip->SetSpringCallback([this](TipWindow* source, int index) {
+        // A drag resting on a folder opens it, so the file being carried can be
+        // taken down through the levels and dropped at the bottom.
+        const ShellEntry& entry = source->entries()[index];
+        if (!entry.is_folder || entry.parsing_path.empty()) return;
+        OpenChild(DepthOf(source), entry.parsing_path, source->RowRect(index));
+    });
+
+    tip->SetDroppedCallback([this](TipWindow*) {
+        // Dropped: the pointer is wherever it let go and there is nothing left
+        // to browse. Deferred, since this runs inside the drop.
         pending_dismiss_ = true;
     });
 
