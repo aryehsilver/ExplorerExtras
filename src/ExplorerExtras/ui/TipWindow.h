@@ -111,6 +111,7 @@ private:
     void EnsureVisible(int index);
     void ApplyFilter();
     void MeasureCountColumn();
+    POINT Place(SIZE size) const;
     void Relayout();
     // rows_ holds the entry indices currently listed, so a position in the
     // list and an index into entries_ are different numbers whenever a filter
@@ -131,6 +132,7 @@ private:
     HFONT font_ = nullptr;
     RECT anchor_{};
     RECT footprint_{};
+    TipPlacement placement_ = TipPlacement::RightOf;
     std::vector<ShellEntry> entries_;
     std::vector<int> rows_;
     std::wstring filter_;

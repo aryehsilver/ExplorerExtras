@@ -11,6 +11,10 @@ notification area and starts with Windows from then on.
 | --- | --- |
 | Double-click empty space to go up a folder | Implemented |
 | Hover a folder for a drill-down subfolder tip | Implemented |
+| Hover a file for a preview, media included | Implemented |
+| The same tip from a tab, an address bar crumb, or the navigation pane | Implemented |
+| Drop files into a tip, springing folders open as you go | Implemented |
+| Type to filter an open tip | Implemented |
 
 ## Subfolder tips
 
@@ -99,6 +103,33 @@ over the tab, since we cannot draw inside Explorer's XAML.
 Tabs are matched to their folder on the tab's label, since the XAML tab strip
 and the `ShellTabWindowClass` children have no handle in common.
 
+**Address bar crumbs and navigation pane entries** do it too. Both name folders
+you can see and cannot see into, which is the whole point of the tip. A crumb
+drops down from the address bar; the crumb before the current one lists the
+current folder's siblings, which is how you go sideways — Windows to Program
+Files — without going up first. The last crumb is skipped, since its contents
+are the view you are already looking at. A pane entry opens beside itself, the
+way one tip level opens from another, pinned entries included.
+
+Neither place says what it points at, so both have to be resolved. A crumb is
+matched by walking up from the folder the tab is showing and comparing display
+names: a crumb's text is not a path, and "This PC" and "Local Disk (C:)" name no
+directory. A pane entry is resolved from the trail of names above it, walked
+down from the root of the shell namespace — and three things there had to be
+measured rather than assumed:
+
+- The root is `SHGetDesktopFolder` and nothing else. Every `IShellItem`
+  spelling of "desktop" gives the *directory* of that name, whose children are
+  the user's own files rather than This PC.
+- The tree's own root is a `Desktop` node that is never drawn and reports no
+  rectangle. Counting it as a step sends the walk looking for This PC inside
+  the Desktop folder.
+- A pinned entry is not in the namespace under the name the pane gives it: it
+  is called `Downloads (pinned)`, state and all. Those are matched from the
+  Quick access folder's side, by the name the folder holds, rather than by
+  cutting a suffix off the pane's — which would mean knowing that suffix in
+  every language Windows ships in.
+
 The tint is drawn with `UpdateLayeredWindow` from a premultiplied 32bpp DIB,
 because it needs per-pixel alpha: it fades out towards the right, and its
 top-left corner is cut to the tab's own radius with fractional coverage so the
@@ -154,6 +185,11 @@ character and Escape clears the filter before it dismisses anything. A footer
 appears with the text and how many of the folder's items survived it, since the
 tip has no focus and nothing else would explain the list changing.
 
+The popup is placed against the row it came from every time its size changes,
+not once when it opens. A long listing gets pushed up the screen to fit on the
+monitor; filtered down to a few rows it is short again, and belongs back beside
+the row that opened it rather than stranded where the long version had to go.
+
 A filter searches the whole folder, not the 300 items a tip lists: on the first
 keystroke a truncated listing is re-read in full, so a name that is there is
 never reported missing. That re-read defers row icons — `SHGetFileInfoW` opens
@@ -187,6 +223,31 @@ its folder drops down beneath it; that zone tints so it is obvious what opened
 it, and the rest of the tab stays an ordinary click target.
 
 ![A window tab dropping down its folder](docs/tab-hover.png)
+
+So does the address bar. Hovering a crumb lists that folder, and the crumb
+before the current one holds the current folder's siblings — sideways in one
+move, without going up first:
+
+![The address bar crumb for C:\Windows dropping down its contents](docs/breadcrumb-tip.png)
+
+And so does the navigation pane, pinned entries included, opening beside the
+entry the way one tip level opens from another:
+
+![A navigation pane entry opening its folder beside it](docs/nav-pane-tip.png)
+
+**Type to narrow it.** Any letter filters the open tip to the names containing
+what you typed, anywhere in the name rather than only at the start. The footer
+says what was typed and how much of the folder survived it — and the search is
+of the whole folder, not the 300 items a tip lists:
+
+![A tip filtered to the thirteen items of System32 matching "driv"](docs/filter.png)
+
+**Drop into it.** Pick a file up in the view, rest on a folder or a tab, and the
+tip opens under the drag; rest on a folder row inside it and that level springs
+open too, so a file goes down several levels and lands at the bottom without
+navigating anywhere:
+
+![A file being dragged through two levels of tip onto a folder](docs/drop.png)
 
 Hover a file instead and you get a preview of it. Images use a shell thumbnail:
 

@@ -317,6 +317,13 @@ void SubfolderTipFeature::UpdateDragState(POINT cursor) {
                        std::abs(cursor.y - button_origin_.y) > GetSystemMetrics(SM_CYDRAG))) {
         dragging_ = true;
         EE_INFO(L"drag in progress: previews suppressed, tips still open");
+        // A preview that was already up is in the way of where the drag is
+        // going, and a drop cannot land in it.
+        if (preview_.Visible()) {
+            preview_.Dismiss();
+            ++preview_token_;
+            if (chain_.empty()) Dismiss();
+        }
     }
 }
 

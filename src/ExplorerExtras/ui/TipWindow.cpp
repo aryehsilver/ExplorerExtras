@@ -172,36 +172,16 @@ bool TipWindow::Create(HINSTANCE instance, std::vector<ShellEntry> entries, bool
     GetMonitorInfoW(MonitorFromPoint(probe, MONITOR_DEFAULTTONEAREST), &monitor);
     work_area_ = monitor.rcWork;
 
+    placement_ = placement;
     const SIZE size = Measure(monitor.rcWork);
-
-    int x = 0;
-    int y = 0;
-    if (placement == TipPlacement::Below) {
-        // Hangs off the anchor's left edge, dropping down; flips above when
-        // there is no room below.
-        x = avoid.left;
-        y = avoid.bottom;
-        if (y + size.cy > monitor.rcWork.bottom) y = avoid.top - size.cy;
-    } else {
-        // Right of the anchor by preference, flipped to the left when that
-        // would run off the monitor.
-        x = avoid.right;
-        if (x + size.cx > monitor.rcWork.right) x = avoid.left - size.cx;
-        y = avoid.top;
-        if (y + size.cy > monitor.rcWork.bottom) y = monitor.rcWork.bottom - size.cy;
-    }
-
-    x = std::clamp<int>(x, monitor.rcWork.left,
-                        std::max<int>(monitor.rcWork.left, monitor.rcWork.right - size.cx));
-    y = std::clamp<int>(y, monitor.rcWork.top,
-                        std::max<int>(monitor.rcWork.top, monitor.rcWork.bottom - size.cy));
+    const POINT origin = Place(size);
 
     // The top row starts highlighted so the keyboard has somewhere to begin.
     hover_ = rows_.empty() ? -1 : rows_.front();
 
-    SetWindowPos(window_, HWND_TOPMOST, x, y, size.cx, size.cy, SWP_NOACTIVATE);
+    SetWindowPos(window_, HWND_TOPMOST, origin.x, origin.y, size.cx, size.cy, SWP_NOACTIVATE);
     ShowWindow(window_, SW_SHOWNOACTIVATE);
-    footprint_ = RECT{x, y, x + size.cx, y + size.cy};
+    footprint_ = RECT{origin.x, origin.y, origin.x + size.cx, origin.y + size.cy};
 
     // A list of folders is a list of places things go, so it accepts drops.
     drop_target_ = new TipDropTarget(this);
@@ -355,6 +335,35 @@ void TipWindow::ReplaceEntries(std::vector<ShellEntry> entries, bool truncated) 
     }
 }
 
+// Where a popup of this size belongs, given what it hangs off. A long listing
+// gets pushed up the screen to fit; a filtered one is short again and belongs
+// back beside the row it came from, so this is worked out afresh every time
+// the size changes rather than once when the window opens.
+POINT TipWindow::Place(SIZE size) const {
+    int x = 0;
+    int y = 0;
+    if (placement_ == TipPlacement::Below) {
+        // Hangs off the anchor's left edge, dropping down; flips above when
+        // there is no room below.
+        x = anchor_.left;
+        y = anchor_.bottom;
+        if (y + size.cy > work_area_.bottom) y = anchor_.top - size.cy;
+    } else {
+        // Right of the anchor by preference, flipped to the left when that
+        // would run off the monitor.
+        x = anchor_.right;
+        if (x + size.cx > work_area_.right) x = anchor_.left - size.cx;
+        y = anchor_.top;
+        if (y + size.cy > work_area_.bottom) y = work_area_.bottom - size.cy;
+    }
+
+    x = std::clamp<int>(x, work_area_.left,
+                        std::max<int>(work_area_.left, work_area_.right - size.cx));
+    y = std::clamp<int>(y, work_area_.top,
+                        std::max<int>(work_area_.top, work_area_.bottom - size.cy));
+    return POINT{x, y};
+}
+
 void TipWindow::Relayout() {
     // The truncation notice belongs to the unfiltered list; once a filter is
     // on, the tail it refers to has been searched too.
@@ -365,15 +374,12 @@ void TipWindow::Relayout() {
 
     RECT rect{};
     GetWindowRect(window_, &rect);
-    const int height = visible_rows_ * row_height_ + footer_height_ + 2;
-    int y = rect.top;
-    if (y + height > work_area_.bottom) {
-        y = std::max<int>(work_area_.top, work_area_.bottom - height);
-    }
-    SetWindowPos(window_, HWND_TOPMOST, rect.left, y, rect.right - rect.left, height,
-                 SWP_NOACTIVATE);
+    const SIZE size{rect.right - rect.left, visible_rows_ * row_height_ + footer_height_ + 2};
+    const POINT origin = Place(size);
 
-    const RECT placed{rect.left, y, rect.right, y + height};
+    SetWindowPos(window_, HWND_TOPMOST, origin.x, origin.y, size.cx, size.cy, SWP_NOACTIVATE);
+
+    const RECT placed{origin.x, origin.y, origin.x + size.cx, origin.y + size.cy};
     UnionRect(&footprint_, &footprint_, &placed);
 }
 
