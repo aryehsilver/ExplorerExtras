@@ -40,11 +40,19 @@ a PDF scrollable and code syntax-highlighted: none of it is reimplemented here,
 it is whatever is already installed. Move the pointer into the preview to
 scroll it; it stays open while the pointer is inside.
 
+Otherwise it falls back to a shell thumbnail — images and video poster frames,
+which have no handler registered. Extraction runs on its own STA thread
+(`ThumbnailLoader`) because `GetImage` can take seconds for an uncached video
+and would otherwise freeze the tip. Only the newest request survives; hovering
+down a list discards the ones overtaken on the way.
+
 **Audio and video** have no registered preview handler, so they are played
 directly through Media Foundation's `IMFMediaEngine` in windowed mode — video
 renders into the preview window, audio gets a slim strip rather than a large
 black rectangle. Playback starts at half volume, since a hover should not
-startle, and stops the moment the preview closes. It has its own tray toggle.
+startle, and stops the moment the preview closes. A second tray toggle opens
+media paused instead, for when a hover should not make a sound at all until the
+play button is pressed.
 
 Media previews carry a transport strip: elapsed time, a progress bar, and time
 remaining counting down. Click the bar to seek, click the video to pause. Only
@@ -60,31 +68,13 @@ slim strip when the file carries none.
 Every preview footer shows the file name, its size, and when it was created and
 last modified, in your locale's own date formats.
 
-### Opening a folder from a tip
+Tips, file previews, media playback, whether media starts playing on hover, and
+the folder counts are five separate tray toggles, so any part of this can be
+turned off without losing the rest.
 
-Activating a folder opens it in a **new window**, not a new tab, and that is a
-platform limit rather than a choice. Windows registers an `opennewtab` verb
-under `HKCR\Folder\shell`, but it is marked `OnlyInBrowserWindow` and Explorer
-contributes it from its own frame menu. An out-of-process context menu for the
-same item never carries it — the verbs actually offered are `open pintohome …
-copyaspath cut copy link delete properties`, with no browser verbs at all.
-Handing the menu a site that vends `SID_SShellBrowser` does not change this.
-
-The only thing that would work is the undocumented `ITabWindowManager`, and a
-feature that exists only as long as an undocumented interface does is not worth
-shipping. The code attempts the verb anyway and falls back, so it will start
-working if the shell ever exposes it.
-
-Otherwise it falls back to a shell thumbnail — images and video poster frames,
-which have no handler registered. Extraction runs on its own STA thread
-(`ThumbnailLoader`) because `GetImage` can take seconds for an uncached video
-and would otherwise freeze the tip. Only the newest request survives; hovering
-down a list discards the ones overtaken on the way.
-
-Both are independently switchable from the tray: subfolder tips and file
-previews are separate toggles.
-
-Those counts are **immediate children only, never recursive**. A recursive total
+Folder rows are annotated with what they hold - "8 folders, 1 file", right
+aligned and dimmed - so a busy folder is obvious before you open it. Those
+counts are **immediate children only, never recursive**. A recursive total
 means walking a whole tree, which is why Explorer itself shows no folder size in
 a details view. Counting also stops at 2000 entries per folder and reports
 "2000+ items", so one enormous folder cannot hold up a tip: listing `C:\Windows`
@@ -103,6 +93,12 @@ over the tab, since we cannot draw inside Explorer's XAML.
 Tabs are matched to their folder on the tab's label, since the XAML tab strip
 and the `ShellTabWindowClass` children have no handle in common.
 
+The tint is drawn with `UpdateLayeredWindow` from a premultiplied 32bpp DIB,
+because it needs per-pixel alpha: it fades out towards the right, and its
+top-left corner is cut to the tab's own radius with fractional coverage so the
+curve is not jagged. `SetLayeredWindowAttributes` can only apply one alpha to a
+whole window, which is why it is not used here.
+
 **Address bar crumbs and navigation pane entries** do it too. Both name folders
 you can see and cannot see into, which is the whole point of the tip. A crumb
 drops down from the address bar; the crumb before the current one lists the
@@ -111,12 +107,31 @@ Files — without going up first. The last crumb is skipped, since its contents
 are the view you are already looking at. A pane entry opens beside itself, the
 way one tip level opens from another, pinned entries included.
 
-Neither place says what it points at, so both have to be resolved. A crumb is
-matched by walking up from the folder the tab is showing and comparing display
-names: a crumb's text is not a path, and "This PC" and "Local Disk (C:)" name no
-directory. A pane entry is resolved from the trail of names above it, walked
-down from the root of the shell namespace — and three things there had to be
-measured rather than assumed:
+Neither place says what it points at, so both have to be resolved.
+
+**A crumb** is matched against the path the tab is showing, taken apart by name
+— which is what crumbs are made of — comparing each step's leaf and the
+folder's display name: "Windows" and "OneDrive" come from one, "Local Disk (C:)"
+and "Aryeh - Personal" from the other. Climbing the shell namespace instead is
+the obvious approach and it is wrong, which took a bug report to find: walking
+up from `C:\Users\<name>\OneDrive\Apps` gives the OneDrive node and then the
+desktop, so Users, the drive and This PC are not on that route at all, while the
+crumbs above it say exactly those words. The address bar spells out a path; the
+namespace is a different tree that happens to end at the same folder. The
+namespace walk stays as the fallback for what a path cannot spell — This PC
+among it — running from the drive root as well so that it is still reachable
+from inside a OneDrive folder.
+
+A crumb also belongs to whichever tab is in front, and nothing outside Explorer
+can say which that is: with three tabs open, all three tab windows and all three
+views report themselves visible. So every tab of the window gets a try,
+frontmost first by Z-order, and the first with an ancestor of that name wins.
+Matching against real ancestors means a hit is a real folder even where the
+guess about which tab is in front is wrong.
+
+**A pane entry** is resolved from the trail of names above it, walked down from
+the root of the shell namespace — and three things there had to be measured
+rather than assumed:
 
 - The root is `SHGetDesktopFolder` and nothing else. Every `IShellItem`
   spelling of "desktop" gives the *directory* of that name, whose children are
@@ -129,12 +144,6 @@ measured rather than assumed:
   Quick access folder's side, by the name the folder holds, rather than by
   cutting a suffix off the pane's — which would mean knowing that suffix in
   every language Windows ships in.
-
-The tint is drawn with `UpdateLayeredWindow` from a premultiplied 32bpp DIB,
-because it needs per-pixel alpha: it fades out towards the right, and its
-top-left corner is cut to the tab's own radius with fractional coverage so the
-curve is not jagged. `SetLayeredWindowAttributes` can only apply one alpha to a
-whole window, which is why it is not used here.
 
 **Dropping into a tip** works the other way round: pick a file up in the view,
 rest the pointer on a folder or a tab, and the tip opens under the drag. Resting
@@ -204,9 +213,20 @@ allowed through for typing and blocked for the arrows, which Explorer uses to
 extend a selection.) It also swallows the matching key-up, so no application
 sees a dangling press.
 
-**Activating a folder** uses the `opennewtab` verb registered under
-`HKCR\Folder\shell`, so it opens as a tab in the existing window rather than a
-new window, falling back to the default verb where that verb is absent.
+### Opening a folder from a tip
+
+Activating a folder opens it in a **new window**, not a new tab, and that is a
+platform limit rather than a choice. Windows registers an `opennewtab` verb
+under `HKCR\Folder\shell`, but it is marked `OnlyInBrowserWindow` and Explorer
+contributes it from its own frame menu. An out-of-process context menu for the
+same item never carries it — the verbs actually offered are `open pintohome …
+copyaspath cut copy link delete properties`, with no browser verbs at all.
+Handing the menu a site that vends `SID_SShellBrowser` does not change this.
+
+The only thing that would work is the undocumented `ITabWindowManager`, and a
+feature that exists only as long as an undocumented interface does is not worth
+shipping. The code attempts the verb anyway and falls back, so it will start
+working if the shell ever exposes it.
 
 ## What it looks like
 
@@ -269,21 +289,21 @@ last modified.
 
 ## Build prerequisites
 
-Visual Studio 2026 is installed on this machine but the **C++ toolset is not**:
-`VC\Tools\MSVC\14.51.36231` has `bin` and `lib\onecore` but no `include`, and
-the C++ standard library headers are absent everywhere in the VS tree. Only
-`Microsoft.VisualStudio.Component.Windows11SDK.22621` is registered.
+Visual Studio with the **Desktop development with C++** workload, and a Windows
+SDK. Nothing else: no vcpkg, no NuGet, no submodules.
 
-Install the missing component (elevation required, ~2 GB):
+The project deliberately does not pin a platform toolset or an SDK version, so
+it picks up v145 (VS 2026) or v143 (VS 2022) and whatever SDK is installed. That
+is also what lets the GitHub runner build it without a word of configuration.
+
+A build that stops at `MSB8003: The PlatformToolset property is not defined`
+means the C++ tools component is missing rather than anything being wrong with
+the project - the `Platform.Default.props` that supplies the default toolset
+ships with it. Adding it takes about 2 GB and elevation:
 
 ```
-"C:\Program Files (x86)\Microsoft Visual Studio\Installer\vs_installer.exe" modify --installPath "C:\Program Files\Microsoft Visual Studio\18\Community" --add Microsoft.VisualStudio.Component.VC.Tools.x86.x64 --norestart
+"C:\Program Files (x86)\Microsoft Visual Studio\Installer\vs_installer.exe" modify --installPath "<your VS install>" --add Microsoft.VisualStudio.Component.VC.Tools.x86.x64 --norestart
 ```
-
-Without it the build stops at `MSB8003: The PlatformToolset property is not
-defined` — the Desktop `Platform.Default.props` that supplies the default
-toolset ships with that component. The project deliberately does not pin a
-toolset, so it picks up v145 (VS 2026) or v143 (VS 2022) automatically.
 
 Then:
 
@@ -306,7 +326,8 @@ Everything here runs out-of-process:
 | --- | --- | --- |
 | Is the pointer over an Explorer window? | `WindowFromPoint` + `GetAncestor` + class check | 0.16–0.39 ms |
 | Empty space, or a row? | UI Automation `ElementFromPoint`, walk to `ListItem` / `UIItemsView` | ~1–2 ms |
-| Which tab is active? | `IShellWindows` → `IServiceProvider(SID_STopLevelBrowser)` → `IShellBrowser` → `QueryActiveShellView` | — |
+| Which tab is the pointer in? | `IShellWindows` → `IServiceProvider(SID_STopLevelBrowser)` → `IShellBrowser::GetWindow`, matched against the `ShellTabWindowClass` under the pointer | — |
+| Which tab is in front? | nothing will say: every tab window of a frame reports itself visible. Z-order first, then check the answer against what was asked for | — |
 | Go up a folder | `IShellBrowser::BrowseObject(NULL, SBSP_SAMEBROWSER \| SBSP_PARENT)` | `S_OK` in 0.7 ms |
 
 If this process crashes, Explorer is untouched.
@@ -335,7 +356,9 @@ visible and nothing resolves at all.
 **2. Shell COM must run on an STA thread.** Called from an MTA, `QueryService`
 and `QueryActiveShellView` both return `S_OK` and then hand back **null window
 handles**. No error, no failed HRESULT — it simply produces nothing. The worker
-thread calls `CoInitializeEx(COINIT_APARTMENTTHREADED)` for this reason.
+thread is apartment-threaded for this reason. It uses `OleInitialize` rather
+than `CoInitializeEx` — same apartment, plus the OLE that drag-and-drop and
+shell context menus need.
 
 **3. `ListItem` bounding rectangles are logical, not clipped.** With the preview
 pane open the file list was 151 px wide while every row reported a width of
@@ -352,40 +375,57 @@ which is what makes the discriminator clean.
 
 ```
 main thread (STA)            worker thread (STA)
-  tray icon, menu              CoInitialize(APARTMENTTHREADED)
+  tray icon, menu              OleInitialize
   WH_MOUSE_LL hook             IUIAutomation, IShellBrowser
+  WH_KEYBOARD_LL hook          tips, previews, drop targets
        |                              ^
-       | gesture recognised           |
+       | gesture or key               |
        | (arithmetic only)            |
        +------ PostMessage -----------+
 ```
 
-The hook callback runs on the input path. It does nothing but double-click
+The mouse hook callback runs on the input path. It does nothing but double-click
 arithmetic and a `PostMessage`, and it always calls `CallNextHookEx` — the click
 reaches Explorer exactly as the user made it. Every call that can block (COM,
 UI Automation) happens on the worker.
+
+The keyboard hook is the one place anything is swallowed, and only ever a key an
+open tip is using while Explorer has focus. It swallows the matching key-up too,
+so no application is left holding a press that never ended.
 
 ## Layout
 
 ```
 src/ExplorerExtras/
-  core/       ExplorerSession   shell interop, active-tab resolution
+  core/       ExplorerSession   shell interop, tab and folder resolution
               ViewHitTest       UI Automation hit testing
+              ShellItems        reading folders, resolving crumbs and pane entries
+              ShellMenu         the shell's own context menu and drag source
+              ThumbnailLoader   thumbnails, on a thread of their own
               MouseHook         WH_MOUSE_LL, gesture recognition
+              KeyboardHook      WH_KEYBOARD_LL, borrowed while a tip is open
               Worker            the STA thread that owns COM
-              Settings, Logging, Paths
+              DarkMode, Settings, Logging, Paths
   features/   NavigateUpFeature double-click empty space to go up
+              SubfolderTipFeature  the chain of tips, previews and highlights
+  ui/         TipWindow         one level of the tip
+              TipDropTarget     what makes a tip take a drop
+              PreviewWindow     the file preview, in its three modes
+              PreviewHandlerHost  hosting the registered IPreviewHandler
+              MediaPreview      Media Foundation playback and transport
+              HighlightWindow   the tint over a tab or a row
   host/       TrayHost          tray icon, menu, lifetime
               AutoStart         "start with Windows"
 ```
 
-`features/` never talks to `host/`. A feature receives a gesture and acts on the
-shell; it does not know whether it was started by the tray app or by anything
-else.
+`features/` never talks to `host/`, and `ui/` never talks to either. A feature
+receives a gesture and acts on the shell; it does not know whether it was
+started by the tray app or by anything else, and a window knows nothing about
+what is driving it.
 
 ## Where things live
 
-Both sit next to the executable, falling back to
+The settings and the log sit next to the executable, falling back to
 `%LOCALAPPDATA%\ExplorerExtras` when that folder is not writable — an installed
 copy under Program Files, say.
 
@@ -397,10 +437,14 @@ copy under Program Files, say.
 ## Diagnostics
 
 Tray menu → **Log element under pointer**. It waits three seconds so you can
-move the pointer over Explorer, then writes the full UI Automation ancestor
-chain at that point to the log. This is how to work out why a particular spot
-does or does not count as empty space — useful for view modes and folder layouts
-not yet covered.
+move the pointer over Explorer, then writes to the log the full UI Automation
+ancestor chain at that point, and - when the pointer is over an Explorer window
+- every tab of that window: which of them Windows calls visible, and what folder
+each is showing.
+
+That is what to send if something does not open where it should. Both halves of
+the address bar bug were read straight out of one of these: the chain said the
+hit test was finding the crumb, so the fault was in what happened next.
 
 ## The one undocumented dependency
 
