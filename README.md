@@ -416,6 +416,12 @@ and its two call sites to remove the dependency entirely.
 
 ## Deliberate non-goals
 
-- The gesture is never swallowed, so Explorer's own behaviour is unchanged.
-- The desktop and the navigation pane are ignored; this is the file list only.
+- No mouse event is ever swallowed, so Explorer's own behaviour is unchanged.
+  Keys are, but only the ones an open tip is using, only while one is on
+  screen, and only when Explorer has focus.
+- The desktop is ignored entirely: only `CabinetWClass` and `ExploreWClass`
+  windows are touched, so nothing here can misfire on another application.
+- Double-clicking to go up is the file list only - never the navigation pane,
+  the tab strip or the address bar, which all have their own click behaviour.
+  Hovering those for a tip is a separate thing, and does work.
 - No elevation. `uiAccess="false"`, `asInvoker`.
