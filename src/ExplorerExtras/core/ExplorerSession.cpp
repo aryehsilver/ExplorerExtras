@@ -200,6 +200,158 @@ std::wstring GetCurrentFolder(const ActiveTab& tab) {
     return CurrentFolderOf(tab.browser.Get());
 }
 
+std::vector<std::wstring> TabFolders(HWND top_level) {
+    std::vector<std::wstring> folders;
+    if (!top_level) return folders;
+
+    // The frame's tab windows, in the order EnumChildWindows gives them, which
+    // is Z-order: frontmost first.
+    std::vector<HWND> order;
+    EnumChildWindows(
+        top_level,
+        [](HWND child, LPARAM param) -> BOOL {
+            if (ClassNameIs(child, kTabWindowClass)) {
+                reinterpret_cast<std::vector<HWND>*>(param)->push_back(child);
+            }
+            return TRUE;
+        },
+        reinterpret_cast<LPARAM>(&order));
+
+    ComPtr<IShellWindows> shell_windows;
+    if (FAILED(CoCreateInstance(CLSID_ShellWindows, nullptr, CLSCTX_ALL,
+                                IID_PPV_ARGS(&shell_windows)))) {
+        return folders;
+    }
+
+    long count = 0;
+    if (FAILED(shell_windows->get_Count(&count))) return folders;
+
+    std::vector<std::pair<HWND, std::wstring>> tabs;
+    for (long i = 0; i < count; ++i) {
+        VARIANT index;
+        VariantInit(&index);
+        index.vt = VT_I4;
+        index.lVal = i;
+
+        ComPtr<IDispatch> dispatch;
+        const HRESULT hr = shell_windows->Item(index, &dispatch);
+        VariantClear(&index);
+        if (FAILED(hr) || !dispatch) continue;
+
+        ComPtr<IWebBrowser2> web_browser;
+        if (FAILED(dispatch.As(&web_browser))) continue;
+
+        SHANDLE_PTR frame = 0;
+        if (FAILED(web_browser->get_HWND(&frame))) continue;
+        if (reinterpret_cast<HWND>(frame) != top_level) continue;
+
+        ComPtr<IServiceProvider> provider;
+        if (FAILED(dispatch.As(&provider))) continue;
+
+        ComPtr<IShellBrowser> browser;
+        if (FAILED(provider->QueryService(SID_STopLevelBrowser, IID_PPV_ARGS(&browser)))) continue;
+
+        HWND entry_tab = nullptr;
+        browser->GetWindow(&entry_tab);
+
+        std::wstring folder = CurrentFolderOf(browser.Get());
+        if (!folder.empty()) tabs.emplace_back(entry_tab, std::move(folder));
+    }
+
+    // Z-order first, then anything whose tab window did not turn up in the
+    // frame's children - a tab in a state we have not seen is still a tab.
+    for (const HWND window : order) {
+        for (auto& tab : tabs) {
+            if (tab.first == window && !tab.second.empty()) {
+                folders.push_back(tab.second);
+                tab.second.clear();
+                break;
+            }
+        }
+    }
+    for (auto& tab : tabs) {
+        if (!tab.second.empty()) folders.push_back(std::move(tab.second));
+    }
+    return folders;
+}
+
+std::wstring DescribeTabs(HWND top_level) {
+    if (!top_level) return L"  (no window)";
+
+    std::wstring out;
+    wchar_t line[512];
+
+    // The frame's own tab children first, since that is a signal available
+    // without any COM at all.
+    EnumChildWindows(
+        top_level,
+        [](HWND child, LPARAM param) -> BOOL {
+            if (ClassNameIs(child, kTabWindowClass)) {
+                auto* text = reinterpret_cast<std::wstring*>(param);
+                RECT r{};
+                GetWindowRect(child, &r);
+                wchar_t entry[256];
+                _snwprintf_s(entry, _TRUNCATE,
+                             L"  child tab 0x%p visible=%d style=0x%08lX rect=%ld,%ld,%ld,%ld\r\n",
+                             child, IsWindowVisible(child) ? 1 : 0,
+                             static_cast<long>(GetWindowLongPtrW(child, GWL_STYLE)), r.left, r.top,
+                             r.right, r.bottom);
+                *text += entry;
+            }
+            return TRUE;
+        },
+        reinterpret_cast<LPARAM>(&out));
+
+    ComPtr<IShellWindows> shell_windows;
+    if (FAILED(CoCreateInstance(CLSID_ShellWindows, nullptr, CLSCTX_ALL,
+                                IID_PPV_ARGS(&shell_windows)))) {
+        return out + L"  (no IShellWindows)";
+    }
+
+    long count = 0;
+    if (FAILED(shell_windows->get_Count(&count))) return out + L"  (no count)";
+
+    for (long i = 0; i < count; ++i) {
+        VARIANT index;
+        VariantInit(&index);
+        index.vt = VT_I4;
+        index.lVal = i;
+
+        ComPtr<IDispatch> dispatch;
+        const HRESULT hr = shell_windows->Item(index, &dispatch);
+        VariantClear(&index);
+        if (FAILED(hr) || !dispatch) continue;
+
+        ComPtr<IWebBrowser2> web_browser;
+        if (FAILED(dispatch.As(&web_browser))) continue;
+
+        SHANDLE_PTR frame = 0;
+        if (FAILED(web_browser->get_HWND(&frame))) continue;
+        if (reinterpret_cast<HWND>(frame) != top_level) continue;
+
+        ComPtr<IServiceProvider> provider;
+        if (FAILED(dispatch.As(&provider))) continue;
+
+        ComPtr<IShellBrowser> browser;
+        if (FAILED(provider->QueryService(SID_STopLevelBrowser, IID_PPV_ARGS(&browser)))) continue;
+
+        HWND entry_tab = nullptr;
+        browser->GetWindow(&entry_tab);
+
+        HWND def_view = nullptr;
+        ComPtr<IShellView> view;
+        if (SUCCEEDED(browser->QueryActiveShellView(&view)) && view) view->GetWindow(&def_view);
+
+        _snwprintf_s(line, _TRUNCATE,
+                     L"  entry %ld tab=0x%p visible=%d view=0x%p visible=%d folder='%s'\r\n", i,
+                     entry_tab, entry_tab && IsWindowVisible(entry_tab) ? 1 : 0, def_view,
+                     def_view && IsWindowVisible(def_view) ? 1 : 0,
+                     CurrentFolderOf(browser.Get()).c_str());
+        out += line;
+    }
+    return out;
+}
+
 std::wstring FindTabFolder(HWND top_level, const std::wstring& tab_name) {
     if (!top_level || tab_name.empty()) return {};
 

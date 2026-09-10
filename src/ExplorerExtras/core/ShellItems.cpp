@@ -212,25 +212,92 @@ bool ResolveChild(const std::wstring& folder_path, const std::wstring& child_dis
     return true;
 }
 
-std::wstring ResolveCrumb(const std::wstring& current_folder, const std::wstring& crumb_name) {
-    if (current_folder.empty() || crumb_name.empty()) return {};
+namespace {
 
+// Does |item| answer to |crumb_name|? A crumb shows whichever name the folder
+// was reached by, so both are fair: the display name for "Local Disk (C:)" and
+// "Aryeh - Personal", the parsing name for "Windows" and "OneDrive".
+bool AnswersTo(IShellItem* item, const std::wstring& crumb_name) {
+    return DisplayNameOf(item, SIGDN_NORMALDISPLAY) == crumb_name ||
+           DisplayNameOf(item, SIGDN_PARENTRELATIVEPARSING) == crumb_name;
+}
+
+// Climbs the shell namespace from |start|, which is not the same as climbing a
+// path: the parent of a folder inside OneDrive is the OneDrive node and then
+// the desktop, with Users, the drive and This PC nowhere in it.
+std::wstring WalkAncestors(const std::wstring& start, const std::wstring& crumb_name) {
     ComPtr<IShellItem> item;
-    if (FAILED(SHCreateItemFromParsingName(current_folder.c_str(), nullptr, IID_PPV_ARGS(&item)))) {
+    if (FAILED(SHCreateItemFromParsingName(start.c_str(), nullptr, IID_PPV_ARGS(&item)))) {
         return {};
     }
 
-    // The first time round is the current folder itself. Deliberately included:
-    // matching it means the pointer is on the last crumb, and returning its own
-    // path lets the caller recognise that and do nothing.
+    // The first time round is |start| itself. Deliberately included: matching
+    // it means the pointer is on the crumb for the folder already on screen,
+    // and returning its own path lets the caller notice and do nothing.
     for (int level = 0; level < 16 && item; ++level) {
-        if (DisplayNameOf(item.Get(), SIGDN_NORMALDISPLAY) == crumb_name) {
+        if (AnswersTo(item.Get(), crumb_name)) {
             return DisplayNameOf(item.Get(), SIGDN_DESKTOPABSOLUTEPARSING);
         }
         ComPtr<IShellItem> parent;
         if (FAILED(item->GetParent(&parent)) || !parent) break;
         item = std::move(parent);
     }
+    return {};
+}
+
+// Every folder on the way down a drive path, deepest first: C:\a\b, C:\a, C:\.
+// Only for real drive paths - a UNC share or a virtual location has no such
+// spelling, and those are left to the namespace walk.
+std::vector<std::wstring> PathAncestors(const std::wstring& folder) {
+    std::vector<std::wstring> steps;
+    if (folder.size() < 3 || folder[1] != L':' || folder[2] != L'\\') return steps;
+
+    std::wstring path = folder;
+    while (path.size() > 3) {
+        steps.push_back(path);
+        const size_t slash = path.find_last_of(L'\\');
+        if (slash == std::wstring::npos) break;
+        path = slash <= 2 ? path.substr(0, 3) : path.substr(0, slash);
+    }
+    steps.push_back(path);  // the drive root itself
+    return steps;
+}
+
+}  // namespace
+
+std::wstring ResolveCrumb(const std::wstring& current_folder, const std::wstring& crumb_name) {
+    if (current_folder.empty() || crumb_name.empty()) return {};
+
+    // The address bar spells out a path; the shell namespace is a different
+    // tree that happens to end at the same folder. Measured walking up from
+    // C:\Users\<name>\OneDrive\Apps: the parents are the OneDrive node and then
+    // the desktop, so "Users", the drive and This PC are not on that route at
+    // all - while the crumbs above it say exactly those words. So the path is
+    // taken apart by name first, which is what the crumbs are made of.
+    const std::vector<std::wstring> steps = PathAncestors(current_folder);
+    for (const std::wstring& step : steps) {
+        const size_t slash = step.find_last_of(L'\\');
+        const std::wstring leaf =
+            (slash == std::wstring::npos || slash + 1 >= step.size()) ? step : step.substr(slash + 1);
+        if (leaf == crumb_name) return step;
+
+        // The crumb can also be the folder's display name - "Local Disk (C:)"
+        // for C:\, "Aryeh - Personal" for a OneDrive root.
+        ComPtr<IShellItem> item;
+        if (SUCCEEDED(SHCreateItemFromParsingName(step.c_str(), nullptr, IID_PPV_ARGS(&item))) &&
+            DisplayNameOf(item.Get(), SIGDN_NORMALDISPLAY) == crumb_name) {
+            return step;
+        }
+    }
+
+    // Then the namespace, for everything a path cannot spell: This PC, the
+    // libraries, a OneDrive root reached as itself rather than as a directory.
+    if (std::wstring found = WalkAncestors(current_folder, crumb_name); !found.empty()) {
+        return found;
+    }
+    // From the drive root as well, since that is where This PC lives and the
+    // walk from a OneDrive folder never gets there.
+    if (!steps.empty()) return WalkAncestors(steps.back(), crumb_name);
     return {};
 }
 

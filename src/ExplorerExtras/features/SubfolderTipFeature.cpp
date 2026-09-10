@@ -209,18 +209,36 @@ void SubfolderTipFeature::TryOpenAt(POINT cursor) {
     // see but not see into, which is the whole point of the tip.
     if (hit.kind == ViewHit::Crumb || hit.kind == ViewHit::NavItem) {
         const auto tab = ResolveActiveTab(frame, FindTabWindow(under_cursor));
-        const std::wstring current = tab ? GetCurrentFolder(*tab) : std::wstring();
 
-        const std::wstring folder = hit.kind == ViewHit::Crumb
-                                        ? ResolveCrumb(current, hit.item_name)
-                                        : ResolveNavItem(hit.ancestors, hit.item_name);
+        std::wstring folder;
+        std::wstring shown;  // the folder of the tab the crumb was matched in
+        if (hit.kind == ViewHit::Crumb) {
+            // A crumb belongs to whichever tab is in front, and nothing outside
+            // Explorer can say which that is: every tab window of a frame
+            // reports itself visible. So every tab gets a try, frontmost
+            // first, and the first one with an ancestor of this name wins -
+            // matching against real ancestors means a hit is a real folder
+            // even when the guess about which tab is in front is wrong.
+            for (const std::wstring& tab_folder : TabFolders(frame)) {
+                folder = ResolveCrumb(tab_folder, hit.item_name);
+                if (!folder.empty()) {
+                    shown = tab_folder;
+                    break;
+                }
+            }
+        } else {
+            folder = ResolveNavItem(hit.ancestors, hit.item_name);
+            if (tab) shown = GetCurrentFolder(*tab);
+        }
+
         if (folder.empty()) {
-            EE_INFO(L"chrome hover: '%s' points at nothing we can read", hit.item_name.c_str());
+            EE_INFO(L"chrome hover: '%s' matched no folder any tab is showing",
+                    hit.item_name.c_str());
             return;
         }
         // The last crumb, or the entry for the folder being shown: its contents
         // are the view the pointer is already looking at.
-        if (folder == current) return;
+        if (folder == shown) return;
 
         if (tab) source_tab_ = *tab;
         // A crumb drops down from the address bar; a pane entry opens beside

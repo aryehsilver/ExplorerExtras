@@ -152,8 +152,11 @@ LRESULT CALLBACK Worker::WndProc(HWND window, UINT message, WPARAM wparam, LPARA
             auto* pt = reinterpret_cast<POINT*>(lparam);
             if (pt) {
                 if (self) {
-                    EE_INFO(L"diagnostics at (%ld,%ld):\r\n%s", pt->x, pt->y,
-                            self->hit_tester_.DescribeChain(*pt).c_str());
+                    const HWND under = WindowFromPoint(*pt);
+                    const HWND frame = under ? GetAncestor(under, GA_ROOT) : nullptr;
+                    EE_INFO(L"diagnostics at (%ld,%ld):\r\n%s%s", pt->x, pt->y,
+                            self->hit_tester_.DescribeChain(*pt).c_str(),
+                            IsExplorerWindow(frame) ? DescribeTabs(frame).c_str() : L"");
                 }
                 delete pt;
             }

@@ -18,6 +18,7 @@
 
 #include <optional>
 #include <string>
+#include <vector>
 
 namespace ee {
 
@@ -43,10 +44,25 @@ std::optional<ActiveTab> ResolveActiveTab(HWND top_level, HWND tab_window);
 // Parsing path of the tab's current folder.
 std::wstring GetCurrentFolder(const ActiveTab& tab);
 
+// The folder each of |top_level|'s tabs is showing, the frontmost first.
+//
+// For a hover on the frame's own chrome - the address bar, the tab strip -
+// there is no tab window under the pointer to identify which tab it belongs
+// to, and Windows is no help: with three tabs open, all three tab windows and
+// all three views report themselves visible. Z-order is the only ordering on
+// offer, so the answer is "probably the first, but here is the rest".
+std::vector<std::wstring> TabFolders(HWND top_level);
+
 // Folder shown by the tab labelled |tab_name| in |top_level|. Tabs are matched
 // on their label, which is the folder's leaf name; where two tabs show
 // same-named folders the first is taken.
 std::wstring FindTabFolder(HWND top_level, const std::wstring& tab_name);
+
+// Every tab of |top_level| as the shell reports it, for the diagnostics dump:
+// which window each entry owns, which of them Windows calls visible, and what
+// folder each is showing. This is the view that decides which tab a hover on
+// the frame's own chrome belongs to.
+std::wstring DescribeTabs(HWND top_level);
 
 // Browses to the parent folder in place. Fails harmlessly at a namespace root.
 HRESULT NavigateUp(const ActiveTab& tab);
