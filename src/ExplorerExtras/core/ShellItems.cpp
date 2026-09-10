@@ -212,6 +212,164 @@ bool ResolveChild(const std::wstring& folder_path, const std::wstring& child_dis
     return true;
 }
 
+std::wstring ResolveCrumb(const std::wstring& current_folder, const std::wstring& crumb_name) {
+    if (current_folder.empty() || crumb_name.empty()) return {};
+
+    ComPtr<IShellItem> item;
+    if (FAILED(SHCreateItemFromParsingName(current_folder.c_str(), nullptr, IID_PPV_ARGS(&item)))) {
+        return {};
+    }
+
+    // The first time round is the current folder itself. Deliberately included:
+    // matching it means the pointer is on the last crumb, and returning its own
+    // path lets the caller recognise that and do nothing.
+    for (int level = 0; level < 16 && item; ++level) {
+        if (DisplayNameOf(item.Get(), SIGDN_NORMALDISPLAY) == crumb_name) {
+            return DisplayNameOf(item.Get(), SIGDN_DESKTOPABSOLUTEPARSING);
+        }
+        ComPtr<IShellItem> parent;
+        if (FAILED(item->GetParent(&parent)) || !parent) break;
+        item = std::move(parent);
+    }
+    return {};
+}
+
+namespace {
+
+// The pinned entries at the top of the navigation pane. They are shortcuts to
+// folders that live somewhere else entirely - "Downloads" there is not a child
+// of anything the pane shows above it - so a name that leads nowhere in the
+// namespace is looked for here before giving up.
+std::wstring ResolvePinned(const std::wstring& name) {
+    // Quick access, which is what Home lists.
+    constexpr wchar_t kQuickAccess[] = L"shell:::{679f85cb-0220-4080-b29b-5540cc05aab6}";
+
+    ComPtr<IShellItem> quick_access;
+    if (FAILED(SHCreateItemFromParsingName(kQuickAccess, nullptr, IID_PPV_ARGS(&quick_access)))) {
+        return {};
+    }
+
+    ComPtr<IEnumShellItems> enumerator;
+    if (FAILED(quick_access->BindToHandler(nullptr, BHID_EnumItems, IID_PPV_ARGS(&enumerator))) ||
+        !enumerator) {
+        return {};
+    }
+
+    ComPtr<IShellItem> child;
+    while (enumerator->Next(1, child.ReleaseAndGetAddressOf(), nullptr) == S_OK) {
+        const std::wstring display = DisplayNameOf(child.Get(), SIGDN_NORMALDISPLAY);
+        if (display.empty()) continue;
+
+        // The pane calls a pinned entry "Downloads (pinned)" - the state is
+        // part of the accessible name. Matched from the folder's side rather
+        // than by cutting a suffix off the pane's, which would mean knowing
+        // what that suffix is in every language Windows ships.
+        const bool same = display == name;
+        const bool prefixed = name.size() > display.size() &&
+                              name.compare(0, display.size(), display) == 0 &&
+                              name[display.size()] == L' ';
+        if (same || prefixed) return DisplayNameOf(child.Get(), SIGDN_DESKTOPABSOLUTEPARSING);
+    }
+    return {};
+}
+
+}  // namespace
+
+std::wstring ResolveNavItem(const std::vector<std::wstring>& ancestors, const std::wstring& name) {
+    if (name.empty()) return {};
+
+    // Walked with IShellFolder rather than IShellItem. The root of the shell
+    // namespace - the thing that has This PC, Network and OneDrive under it -
+    // is only reachable as SHGetDesktopFolder; every IShellItem spelling of
+    // "desktop" resolves to the directory of that name instead, whose children
+    // are the user's own files. Measured: enumerating the IShellItem version
+    // returns the files on the desktop and no This PC at all.
+    ComPtr<IShellFolder> folder;
+    HRESULT hr = SHGetDesktopFolder(&folder);
+    if (FAILED(hr)) {
+        EE_INFO(L"nav: SHGetDesktopFolder failed hr=0x%08X", hr);
+        return {};
+    }
+
+    std::vector<std::wstring> trail = ancestors;
+    trail.push_back(name);
+
+    // Built up as the walk descends, since a child id only means anything
+    // relative to the folder it came from.
+    PIDLIST_ABSOLUTE absolute = nullptr;
+    auto release = [&absolute] {
+        if (absolute) CoTaskMemFree(absolute);
+        absolute = nullptr;
+    };
+
+    for (const std::wstring& step : trail) {
+        if (step.empty()) {
+            release();
+            return {};
+        }
+
+        ComPtr<IEnumIDList> enumerator;
+        if (FAILED(folder->EnumObjects(nullptr, SHCONTF_FOLDERS | SHCONTF_INCLUDEHIDDEN,
+                                       &enumerator)) ||
+            !enumerator) {
+            release();
+            return {};
+        }
+
+        PITEMID_CHILD child = nullptr;
+        PITEMID_CHILD matched = nullptr;
+        ULONG fetched = 0;
+        while (enumerator->Next(1, &child, &fetched) == S_OK && fetched == 1) {
+            STRRET raw{};
+            wchar_t* display = nullptr;
+            if (SUCCEEDED(folder->GetDisplayNameOf(child, SHGDN_INFOLDER, &raw)) &&
+                SUCCEEDED(StrRetToStrW(&raw, child, &display)) && display) {
+                const bool hit = step == display;
+                CoTaskMemFree(display);
+                if (hit) {
+                    matched = child;
+                    break;
+                }
+            }
+            CoTaskMemFree(child);
+        }
+        if (!matched) {
+            release();
+            // Only a top-level entry can be a pinned one; anything deeper was
+            // reached through a parent that does exist in the namespace.
+            if (trail.size() == 1) return ResolvePinned(name);
+            return {};
+        }
+
+        PIDLIST_ABSOLUTE combined = ILCombine(absolute, matched);
+        release();
+        absolute = combined;
+
+        ComPtr<IShellFolder> next;
+        hr = folder->BindToObject(matched, nullptr, IID_PPV_ARGS(&next));
+        CoTaskMemFree(matched);
+        if (FAILED(hr) || !next) {
+            // The last step does not have to be bindable to be the answer, but
+            // anything mid-trail does.
+            if (&step != &trail.back()) {
+                release();
+                return {};
+            }
+            break;
+        }
+        folder = std::move(next);
+    }
+
+    if (!absolute) return {};
+
+    ComPtr<IShellItem> item;
+    hr = SHCreateItemFromIDList(absolute, IID_PPV_ARGS(&item));
+    release();
+    if (FAILED(hr)) return {};
+
+    return DisplayNameOf(item.Get(), SIGDN_DESKTOPABSOLUTEPARSING);
+}
+
 bool ResolveChildFolder(const std::wstring& folder_path, const std::wstring& child_display_name,
                         std::wstring* child_path) {
     bool is_folder = false;

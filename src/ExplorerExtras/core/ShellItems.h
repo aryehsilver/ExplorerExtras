@@ -40,6 +40,21 @@ bool ResolveChild(const std::wstring& folder_path, const std::wstring& child_dis
 bool ResolveChildFolder(const std::wstring& folder_path, const std::wstring& child_display_name,
                         std::wstring* child_path);
 
+// The folder an address-bar crumb stands for. The crumbs are the ancestors of
+// what the tab is showing, so this walks up from |current_folder| comparing
+// display names rather than trying to parse the crumb's text as a path - which
+// it is not: "Local Disk (C:)" and "This PC" name no directory.
+// Empty when nothing matches, including for the crumb of the current folder
+// itself, which has nothing to offer that is not already on screen.
+std::wstring ResolveCrumb(const std::wstring& current_folder, const std::wstring& crumb_name);
+
+// The folder a navigation pane entry stands for, from the trail of display
+// names that leads to it ("This PC", "Local Disk (C:)", "Users"). Resolved
+// against the shell namespace from the desktop down, since half of what the
+// pane lists - This PC, OneDrive, Network - is not a path at all.
+std::wstring ResolveNavItem(const std::vector<std::wstring>& ancestors,
+                            const std::wstring& name);
+
 // An icon that has not been looked up yet. Whoever draws the row resolves it.
 inline constexpr int kIconDeferred = -2;
 

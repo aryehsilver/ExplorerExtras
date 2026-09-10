@@ -3,6 +3,7 @@
 #include <objbase.h>
 #include <oleauto.h>
 
+#include <algorithm>
 #include <cstdio>
 
 #include "Logging.h"
@@ -27,6 +28,15 @@ constexpr const wchar_t* kRejectClasses[] = {
 // A row is nested a few levels below the cell that ElementFromPoint returns
 // (UIProperty -> ListItem), so the walk stays shallow.
 constexpr int kMaxWalkDepth = 10;
+
+// The address bar's crumbs. Both are SplitButtons whose name is the folder:
+// the first is the icon-only one at the left, the rest are the named ones.
+constexpr wchar_t kCrumbClass[] = L"FileExplorerExtensions.BreadcrumbBarItemControl";
+constexpr wchar_t kFirstCrumbClass[] = L"FileExplorerExtensions.FirstCrumbStackPanelControl";
+
+// The navigation pane is a plain tree, and its entries are nested: an entry
+// several levels in needs the names above it to say what it points at.
+constexpr int kMaxAncestors = 8;
 
 std::wstring GetClassNameOf(IUIAutomationElement* element) {
     BSTR raw = nullptr;
@@ -122,6 +132,43 @@ HitResult ViewHitTester::Test(POINT screen_pt) {
                     result.tab_selected = selected != FALSE;
                 }
             }
+            return result;
+        }
+
+        if (control_type == UIA_SplitButtonControlTypeId &&
+            (EqualsOrdinal(class_name, kCrumbClass) || EqualsOrdinal(class_name, kFirstCrumbClass))) {
+            result.kind = ViewHit::Crumb;
+            result.item_name = GetNameOf(current.Get());
+            current->get_CurrentBoundingRectangle(&result.item_rect);
+            return result;
+        }
+
+        if (control_type == UIA_TreeItemControlTypeId) {
+            result.kind = ViewHit::NavItem;
+            result.item_name = GetNameOf(current.Get());
+            current->get_CurrentBoundingRectangle(&result.item_rect);
+
+            // Collect the trail above it, innermost first, then reverse: the
+            // resolver walks down from the root.
+            ComPtr<IUIAutomationElement> above = current;
+            for (int extra = 0; extra < kMaxAncestors; ++extra) {
+                ComPtr<IUIAutomationElement> parent;
+                if (FAILED(walker_->GetParentElement(above.Get(), &parent)) || !parent) break;
+                above = parent;
+                CONTROLTYPEID parent_type = 0;
+                above->get_CurrentControlType(&parent_type);
+                if (parent_type != UIA_TreeItemControlTypeId) break;  // reached the tree itself
+                // The tree's root is a "Desktop" node that is never drawn, and
+                // it reports no rectangle. It stands for the root of the shell
+                // namespace, which is where the resolver starts from anyway -
+                // taking it as a step would look for This PC inside the Desktop
+                // folder.
+                RECT bounds{};
+                above->get_CurrentBoundingRectangle(&bounds);
+                if (IsRectEmpty(&bounds)) break;
+                result.ancestors.push_back(GetNameOf(above.Get()));
+            }
+            std::reverse(result.ancestors.begin(), result.ancestors.end());
             return result;
         }
 

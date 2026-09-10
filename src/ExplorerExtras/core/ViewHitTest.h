@@ -13,19 +13,26 @@
 #include <wrl/client.h>
 
 #include <string>
+#include <vector>
 
 namespace ee {
 
 enum class ViewHit {
-    None,        // not the file list (nav pane, toolbar, preview pane, another app...)
+    None,        // not the file list (toolbar, preview pane, another app...)
     EmptySpace,  // inside the file list but not on an item
     Item,        // on a file or folder row
     Tab,         // on one of the window's tabs
+    Crumb,       // on a folder in the address bar
+    NavItem,     // on a folder in the navigation pane
 };
 
 struct HitResult {
     ViewHit kind = ViewHit::None;
-    std::wstring item_name;  // display name, only when kind == Item
+    std::wstring item_name;  // display name, for Item, Tab, Crumb and NavItem
+    // For NavItem: the display names of the tree items above this one, root
+    // first. The navigation pane never says where an entry points, so the only
+    // way back to a path is the trail of names that leads to it.
+    std::vector<std::wstring> ancestors;
     // Logical row bounds. A row reports its full width even when the view is
     // narrower, so intersect with |view_rect| before using this to place UI.
     RECT item_rect{};

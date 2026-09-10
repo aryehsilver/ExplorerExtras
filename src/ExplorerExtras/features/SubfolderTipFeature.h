@@ -55,6 +55,8 @@ public:
 private:
     void TryOpenAt(POINT cursor);
     void TryOpenTab(HWND frame, const HitResult& hit, const RECT& zone);
+    // A folder named somewhere in the window's chrome rather than in the view.
+    void OpenChromeFolder(const std::wstring& folder, const RECT& anchor, TipPlacement placement);
     void UpdateHighlight(POINT cursor);
     void OpenChild(size_t parent_depth, const std::wstring& folder_path, const RECT& anchor);
     void RequestPreview(const std::wstring& path, const RECT& anchor);

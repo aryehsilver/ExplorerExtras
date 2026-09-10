@@ -204,6 +204,32 @@ void SubfolderTipFeature::TryOpenAt(POINT cursor) {
     // A row whose name did not come back: Explorer's automation provider is
     // busy, which it reliably is while a drag is under way, and the point is
     // left open to the remaining attempts rather than written off after one.
+    // A folder named in the window's chrome drops the same list: a crumb in the
+    // address bar, or an entry in the navigation pane. Both are folders you can
+    // see but not see into, which is the whole point of the tip.
+    if (hit.kind == ViewHit::Crumb || hit.kind == ViewHit::NavItem) {
+        const auto tab = ResolveActiveTab(frame, FindTabWindow(under_cursor));
+        const std::wstring current = tab ? GetCurrentFolder(*tab) : std::wstring();
+
+        const std::wstring folder = hit.kind == ViewHit::Crumb
+                                        ? ResolveCrumb(current, hit.item_name)
+                                        : ResolveNavItem(hit.ancestors, hit.item_name);
+        if (folder.empty()) {
+            EE_INFO(L"chrome hover: '%s' points at nothing we can read", hit.item_name.c_str());
+            return;
+        }
+        // The last crumb, or the entry for the folder being shown: its contents
+        // are the view the pointer is already looking at.
+        if (folder == current) return;
+
+        if (tab) source_tab_ = *tab;
+        // A crumb drops down from the address bar; a pane entry opens beside
+        // itself, the way one tip level opens from another.
+        OpenChromeFolder(folder, hit.item_rect,
+                         hit.kind == ViewHit::Crumb ? TipPlacement::Below : TipPlacement::RightOf);
+        return;
+    }
+
     if (hit.kind != ViewHit::Item || hit.item_name.empty()) {
         if (hit.kind == ViewHit::Item && probe_settled_) {
             EE_INFO(L"probe: the row at (%ld,%ld) would not name itself in %d attempts", cursor.x,
@@ -381,6 +407,35 @@ void SubfolderTipFeature::TryOpenTab(HWND frame, const HitResult& hit, const REC
     outside_ms_ = 0;
     UpdateKeyboardCapture();
     EE_INFO(L"tab hover: '%s' -> '%s'", hit.item_name.c_str(), folder.c_str());
+}
+
+void SubfolderTipFeature::OpenChromeFolder(const std::wstring& folder, const RECT& anchor,
+                                           TipPlacement placement) {
+    if (folder == source_path_) return;
+    if (!chain_.empty() || preview_.Visible()) {
+        POINT cursor{};
+        GetCursorPos(&cursor);
+        Dismiss();
+        last_probe_pt_ = cursor;  // Dismiss clears it, and this point is probed
+    }
+
+    bool truncated = false;
+    std::vector<ShellEntry> entries = EnumerateFolder(folder, kMaxEntries, &truncated);
+    if (entries.empty() && !truncated) return;
+
+    auto tip = std::make_unique<TipWindow>();
+    if (!tip->Create(instance_, std::move(entries), truncated, anchor, placement)) return;
+
+    tip->SetFolder(folder);
+    Wire(tip.get());
+    chain_.push_back(std::move(tip));
+
+    source_row_ = anchor;
+    source_path_ = folder;
+    from_tab_ = false;
+    outside_ms_ = 0;
+    UpdateKeyboardCapture();
+    EE_INFO(L"chrome hover: '%s'", folder.c_str());
 }
 
 void SubfolderTipFeature::OpenChild(size_t parent_depth, const std::wstring& folder_path,
