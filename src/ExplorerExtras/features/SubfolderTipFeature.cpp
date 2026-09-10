@@ -16,8 +16,16 @@ namespace ee {
 namespace {
 
 constexpr DWORD kDwellMs = 400;    // rest this long before anything appears
-constexpr DWORD kGraceMs = 350;    // pointer may stray this long before dismissal
+constexpr DWORD kGraceMs = 800;    // pointer may stray this long before dismissal
+// Straying a few pixels on the way from a row to what it opened is not
+// leaving. Every rectangle the pointer is allowed to rest in is grown by this,
+// and so is the corridor between them.
+constexpr int kSlopDip = 16;
 constexpr size_t kMaxEntries = 300;
+// A filter searches the whole folder, not the part that fits: typing a name
+// that is there and being told there are no matches is worse than a pause.
+// Only ever paid once per tip, and only for a folder big enough to truncate.
+constexpr size_t kMaxFilterEntries = 20000;
 constexpr int kPreviewEdge = 480;  // longest side of the thumbnail, in pixels
 
 // Only the leading part of a tab opens its drop-down, so the rest of the tab
@@ -31,11 +39,49 @@ RECT TabTriggerZone(const RECT& tab) {
     return zone;
 }
 
+// What a key would type, without a keyboard layout's shift state: the filter
+// matches case insensitively, so an unshifted character is enough.
+wchar_t FilterChar(DWORD vk) {
+    if (vk >= VK_NUMPAD0 && vk <= VK_NUMPAD9) {
+        return static_cast<wchar_t>(L'0' + (vk - VK_NUMPAD0));
+    }
+    if (vk == VK_SPACE) return L' ';
+    const UINT mapped = MapVirtualKeyW(vk, MAPVK_VK_TO_CHAR);
+    if (mapped == 0) return 0;
+    if (mapped & 0x80000000) return 0;  // a dead key has no character of its own
+    const wchar_t ch = static_cast<wchar_t>(mapped & 0xFFFF);
+    return iswprint(ch) ? ch : 0;
+}
+
 double ElapsedMs(LARGE_INTEGER start) {
     LARGE_INTEGER now, frequency;
     QueryPerformanceCounter(&now);
     QueryPerformanceFrequency(&frequency);
     return (now.QuadPart - start.QuadPart) * 1000.0 / frequency.QuadPart;
+}
+
+// The gap the pointer has to cross between a row and the popup it opened.
+// Almost nobody crosses it in a straight line - the pointer clips a corner,
+// and on an exact hit test the popup vanishes mid-journey. False when the two
+// rectangles touch or overlap, where there is nothing to cross.
+bool Corridor(const RECT& from, const RECT& to, RECT* out) {
+    const LONG left = std::min(from.left, to.left);
+    const LONG right = std::max(from.right, to.right);
+    const LONG top = std::min(from.top, to.top);
+    const LONG bottom = std::max(from.bottom, to.bottom);
+
+    if (to.left >= from.right) {
+        *out = RECT{from.right, top, to.left, bottom};
+    } else if (to.right <= from.left) {
+        *out = RECT{to.right, top, from.left, bottom};
+    } else if (to.top >= from.bottom) {
+        *out = RECT{left, from.bottom, right, to.top};
+    } else if (to.bottom <= from.top) {
+        *out = RECT{left, to.bottom, right, from.top};
+    } else {
+        return false;
+    }
+    return true;
 }
 
 }  // namespace
@@ -103,8 +149,7 @@ void SubfolderTipFeature::OnTick(POINT cursor, DWORD still_ms) {
         return;
     }
 
-    if (PointerInsideChain(cursor) || preview_.ContainsPoint(cursor) ||
-        PtInRect(&source_row_, cursor)) {
+    if (PointerInSafeZone(cursor)) {
         outside_ms_ = 0;
         return;
     }
@@ -185,6 +230,7 @@ void SubfolderTipFeature::TryOpenAt(POINT cursor) {
     auto tip = std::make_unique<TipWindow>();
     if (!tip->Create(instance_, std::move(entries), truncated, anchor)) return;
 
+    tip->SetFolder(child_path);
     Wire(tip.get());
     chain_.push_back(std::move(tip));
     UpdateKeyboardCapture();
@@ -257,6 +303,7 @@ void SubfolderTipFeature::TryOpenTab(HWND frame, const HitResult& hit, const REC
         return;
     }
 
+    tip->SetFolder(folder);
     Wire(tip.get());
     chain_.push_back(std::move(tip));
 
@@ -283,6 +330,7 @@ void SubfolderTipFeature::OpenChild(size_t parent_depth, const std::wstring& fol
     auto tip = std::make_unique<TipWindow>();
     if (!tip->Create(instance_, std::move(entries), truncated, anchor)) return;
 
+    tip->SetFolder(folder_path);
     Wire(tip.get());
     chain_.push_back(std::move(tip));
     outside_ms_ = 0;
@@ -351,6 +399,9 @@ void SubfolderTipFeature::OnKey(DWORD virtual_key) {
     if (chain_.empty()) return;
     TipWindow* top = chain_.back().get();
 
+    // A key is activity: whatever the pointer is doing, this is not abandonment.
+    outside_ms_ = 0;
+
     switch (virtual_key) {
         case VK_DOWN:
             top->MoveSelection(1);
@@ -388,11 +439,57 @@ void SubfolderTipFeature::OnKey(DWORD virtual_key) {
         }
 
         case VK_ESCAPE:
-            Dismiss();
+            // A filter is undone first: Escape backs out one thing at a time.
+            if (!top->Filter().empty()) {
+                top->SetFilter(L"");
+            } else {
+                Dismiss();
+            }
             break;
 
         default:
+            OnFilterKey(virtual_key);
             break;
+    }
+}
+
+// Typing narrows the level the pointer is on. A long folder is otherwise only
+// navigable by scrolling, and the tip has no other use for these keys.
+void SubfolderTipFeature::OnFilterKey(DWORD virtual_key) {
+    TipWindow* top = chain_.back().get();
+    std::wstring filter = top->Filter();
+
+    if (virtual_key == VK_BACK) {
+        if (filter.empty()) return;
+        filter.pop_back();
+    } else {
+        const wchar_t ch = FilterChar(virtual_key);
+        if (!ch) return;
+        if (ch == L' ' && filter.empty()) return;  // a leading space matches everything
+        filter.push_back(ch);
+    }
+
+    // Whatever was open came from a row that may not survive the filter.
+    CloseFrom(DepthOf(top) + 1);
+    preview_.Dismiss();
+    ++preview_token_;
+    top->SetFilter(filter);
+    UpdateKeyboardCapture();
+
+    // A truncated listing was only ever the part that fit on screen. Once the
+    // user is searching rather than browsing, read the rest of the folder, so
+    // the answer is about the folder and not about the first 300 of it. After
+    // the filter has been applied, not before: the keystroke has to land at
+    // once, and this is the one slow thing a keystroke can set off.
+    if (top->Truncated() && !filter.empty() && !top->Folder().empty()) {
+        LARGE_INTEGER start;
+        QueryPerformanceCounter(&start);
+        bool truncated = false;
+        std::vector<ShellEntry> full =
+            EnumerateFolder(top->Folder(), kMaxFilterEntries, &truncated, /*defer_icons=*/true);
+        EE_INFO(L"filter: re-read '%s' in full, %zu entries in %.0fms", top->Folder().c_str(),
+                full.size(), ElapsedMs(start));
+        if (!full.empty()) top->ReplaceEntries(std::move(full), truncated);
     }
 }
 
@@ -467,6 +564,42 @@ size_t SubfolderTipFeature::DepthOf(const TipWindow* window) const {
         if (chain_[i].get() == window) return i;
     }
     return 0;
+}
+
+// Everything on screen, the routes between those things, and a margin round
+// the lot. Anywhere else, and the pointer has genuinely gone somewhere else.
+bool SubfolderTipFeature::PointerInSafeZone(POINT screen_pt) const {
+    UINT dpi = 96;
+    if (!chain_.empty()) {
+        dpi = GetDpiForWindow(chain_.front()->Handle());
+    } else if (preview_.Handle()) {
+        dpi = GetDpiForWindow(preview_.Handle());
+    }
+    const int slop = MulDiv(kSlopDip, static_cast<int>(dpi), 96);
+
+    const auto within = [slop, screen_pt](RECT rect) {
+        InflateRect(&rect, slop, slop);
+        return PtInRect(&rect, screen_pt) != FALSE;
+    };
+
+    if (!IsRectEmpty(&source_row_) && within(source_row_)) return true;
+
+    RECT corridor{};
+    for (const auto& tip : chain_) {
+        // The footprint, not the window: filtering shrinks a tip, and the
+        // pointer that was resting inside where it used to be has not moved.
+        const RECT rect = tip->FootprintRect();
+        if (within(rect)) return true;
+        if (Corridor(tip->AnchorRect(), rect, &corridor) && within(corridor)) return true;
+    }
+
+    if (preview_.Visible()) {
+        RECT rect{};
+        GetWindowRect(preview_.Handle(), &rect);
+        if (within(rect)) return true;
+        if (Corridor(preview_anchor_, rect, &corridor) && within(corridor)) return true;
+    }
+    return false;
 }
 
 bool SubfolderTipFeature::PointerInsideChain(POINT screen_pt) const {

@@ -64,14 +64,14 @@ void CountChildren(const std::wstring& path, ShellEntry* entry) {
     FindClose(search);
 }
 
+}  // namespace
+
 int IconIndexFor(const std::wstring& path) {
     SHFILEINFOW info{};
     const DWORD_PTR result = SHGetFileInfoW(path.c_str(), 0, &info, sizeof(info),
                                             SHGFI_SYSICONINDEX | SHGFI_SMALLICON);
     return result ? info.iIcon : -1;
 }
-
-}  // namespace
 
 std::wstring DescribeChildCount(const ShellEntry& entry) {
     if (!entry.is_folder || !entry.counted) return {};
@@ -219,7 +219,7 @@ bool ResolveChildFolder(const std::wstring& folder_path, const std::wstring& chi
 }
 
 std::vector<ShellEntry> EnumerateFolder(const std::wstring& folder_path, size_t max_entries,
-                                        bool* truncated) {
+                                        bool* truncated, bool defer_icons) {
     std::vector<ShellEntry> entries;
     if (truncated) *truncated = false;
     if (folder_path.empty()) return entries;
@@ -250,7 +250,11 @@ std::vector<ShellEntry> EnumerateFolder(const std::wstring& folder_path, size_t 
         entry.display_name = DisplayNameOf(child.Get(), SIGDN_NORMALDISPLAY);
         entry.parsing_path = DisplayNameOf(child.Get(), SIGDN_DESKTOPABSOLUTEPARSING);
         if (entry.display_name.empty()) continue;
-        entry.icon_index = entry.parsing_path.empty() ? -1 : IconIndexFor(entry.parsing_path);
+        if (entry.parsing_path.empty()) {
+            entry.icon_index = -1;
+        } else {
+            entry.icon_index = defer_icons ? kIconDeferred : IconIndexFor(entry.parsing_path);
+        }
 
         if (entry.is_folder && !entry.parsing_path.empty()) {
             // One directory pass per folder. Skipped for UNC paths, where the

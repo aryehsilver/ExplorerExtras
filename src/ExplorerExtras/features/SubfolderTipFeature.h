@@ -32,7 +32,8 @@ public:
     // |still_ms| is how long the pointer has been stationary at |cursor|.
     void OnTick(POINT cursor, DWORD still_ms);
 
-    // Arrow keys, Enter and Escape, forwarded by the keyboard hook.
+    // Arrow keys, Enter, Escape and anything typed, forwarded by the keyboard
+    // hook while a tip is showing.
     void OnKey(DWORD virtual_key);
 
     // Any click anywhere. A click outside our own windows means the user is
@@ -60,9 +61,12 @@ private:
     void CloseFrom(size_t depth);
     size_t DepthOf(const TipWindow* window) const;
     bool PointerInsideChain(POINT screen_pt) const;
+    // Where the pointer may be without the tip taking it as having left.
+    bool PointerInSafeZone(POINT screen_pt) const;
     void Wire(TipWindow* tip);
     void Activate(const ShellEntry& entry);
     void UpdateKeyboardCapture();
+    void OnFilterKey(DWORD virtual_key);
 
     HINSTANCE instance_ = nullptr;
     ViewHitTester* tester_ = nullptr;

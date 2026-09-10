@@ -2,10 +2,12 @@
 
 #include <commctrl.h>
 #include <dwmapi.h>
+#include <shlwapi.h>
 #include <windowsx.h>
 
 #include <algorithm>
 #include <cstdlib>
+#include <string>
 
 #include "../core/Logging.h"
 
@@ -119,7 +121,7 @@ SIZE TipWindow::Measure(const RECT& work_area) {
                                  Scale(kMinWidthDip, dpi_), max_width);
 
     const int room = (work_area.bottom - work_area.top) / std::max(row_height_, 1) - 1;
-    const int rows = static_cast<int>(entries_.size()) + (truncated_ ? 1 : 0);
+    const int rows = static_cast<int>(rows_.size()) + (truncated_ ? 1 : 0);
     visible_rows_ = std::clamp(rows, 1, std::min(kMaxRows, std::max(room, 1)));
 
     return SIZE{width, visible_rows_ * row_height_ + 2};
@@ -130,6 +132,8 @@ bool TipWindow::Create(HINSTANCE instance, std::vector<ShellEntry> entries, bool
     if (!EnsureClassRegistered(instance)) return false;
     entries_ = std::move(entries);
     truncated_ = truncated;
+    anchor_ = avoid;
+    ApplyFilter();
     dark_ = AppsUseDarkTheme();
     if (entries_.empty() && !truncated_) return false;
 
@@ -152,6 +156,7 @@ bool TipWindow::Create(HINSTANCE instance, std::vector<ShellEntry> entries, bool
     monitor.cbSize = sizeof(monitor);
     const POINT probe{avoid.right, avoid.top};
     GetMonitorInfoW(MonitorFromPoint(probe, MONITOR_DEFAULTTONEAREST), &monitor);
+    work_area_ = monitor.rcWork;
 
     const SIZE size = Measure(monitor.rcWork);
 
@@ -178,10 +183,11 @@ bool TipWindow::Create(HINSTANCE instance, std::vector<ShellEntry> entries, bool
                         std::max<int>(monitor.rcWork.top, monitor.rcWork.bottom - size.cy));
 
     // The top row starts highlighted so the keyboard has somewhere to begin.
-    hover_ = entries_.empty() ? -1 : 0;
+    hover_ = rows_.empty() ? -1 : rows_.front();
 
     SetWindowPos(window_, HWND_TOPMOST, x, y, size.cx, size.cy, SWP_NOACTIVATE);
     ShowWindow(window_, SW_SHOWNOACTIVATE);
+    footprint_ = RECT{x, y, x + size.cx, y + size.cy};
     return true;
 }
 
@@ -201,16 +207,125 @@ bool TipWindow::ContainsPoint(POINT screen_pt) const {
 RECT TipWindow::RowRect(int index) const {
     RECT rect{};
     if (!window_) return rect;
+    const int position = PositionOf(index);
+    if (position < 0) return rect;  // filtered out: it is not on screen
     GetWindowRect(window_, &rect);
-    const int top = rect.top + 1 + (index - scroll_) * row_height_;
+    const int top = rect.top + 1 + (position - scroll_) * row_height_;
     return RECT{rect.left, top, rect.right, top + row_height_};
 }
 
 int TipWindow::RowAtClient(POINT client_pt) const {
     if (client_pt.y < 1) return -1;
-    const int index = scroll_ + (client_pt.y - 1) / std::max(row_height_, 1);
-    if (index < 0 || index >= static_cast<int>(entries_.size())) return -1;
-    return index;
+    RECT client{};
+    GetClientRect(window_, &client);
+    if (client_pt.y >= client.bottom - footer_height_ - 1) return -1;  // the filter footer
+    return EntryAt(scroll_ + (client_pt.y - 1) / std::max(row_height_, 1));
+}
+
+int TipWindow::PositionOf(int entry_index) const {
+    for (size_t i = 0; i < rows_.size(); ++i) {
+        if (rows_[i] == entry_index) return static_cast<int>(i);
+    }
+    return -1;
+}
+
+int TipWindow::EntryAt(int position) const {
+    if (position < 0 || position >= static_cast<int>(rows_.size())) return -1;
+    return rows_[position];
+}
+
+void TipWindow::ApplyFilter() {
+    rows_.clear();
+    rows_.reserve(entries_.size());
+    for (int i = 0; i < static_cast<int>(entries_.size()); ++i) {
+        // Substring rather than prefix: half of what is worth finding in a
+        // folder full of similarly named files is in the middle of the name.
+        if (filter_.empty() ||
+            StrStrIW(entries_[i].display_name.c_str(), filter_.c_str()) != nullptr) {
+            rows_.push_back(i);
+        }
+    }
+}
+
+// The column is only as wide as the counts actually on screen. Measured again
+// whenever the listing changes, or a row that arrived later - "8 folders" where
+// the first listing only ever said "3 files" - is drawn clipped.
+void TipWindow::MeasureCountColumn() {
+    if (!window_) return;
+
+    const HDC dc = GetDC(window_);
+    const HGDIOBJ previous = SelectObject(dc, font_);
+    int widest = 0;
+    for (const int index : rows_) {
+        const std::wstring text = DescribeChildCount(entries_[index]);
+        if (text.empty()) continue;
+        SIZE extent{};
+        GetTextExtentPoint32W(dc, text.c_str(), static_cast<int>(text.size()), &extent);
+        widest = std::max(widest, static_cast<int>(extent.cx));
+    }
+    SelectObject(dc, previous);
+    ReleaseDC(window_, dc);
+
+    RECT client{};
+    GetClientRect(window_, &client);
+    // Not at the name's expense past a point: the name is what is being read.
+    count_column_ = std::min<int>(widest, (client.right - client.left) * 45 / 100);
+}
+
+void TipWindow::SetFilter(const std::wstring& text) {
+    filter_ = text;
+    ApplyFilter();
+    MeasureCountColumn();
+    scroll_ = 0;
+    // Land on the first match, so Enter and Right act on something without
+    // any further keys. Selecting deliberately does not arm the dwell timers.
+    hover_ = rows_.empty() ? -1 : rows_.front();
+    pending_row_ = -1;
+    if (window_) {
+        KillTimer(window_, kExpandTimerId);
+        Relayout();
+        InvalidateRect(window_, nullptr, FALSE);
+    }
+}
+
+void TipWindow::ReplaceEntries(std::vector<ShellEntry> entries, bool truncated) {
+    entries_ = std::move(entries);
+    truncated_ = truncated;
+    // Deliberately not re-measured: the window keeps the width it opened with,
+    // since a tip that jumps sideways on a keystroke is worse than a name that
+    // ellipsises.
+    ApplyFilter();
+    MeasureCountColumn();
+    scroll_ = 0;
+    hover_ = rows_.empty() ? -1 : rows_.front();
+    pending_row_ = -1;
+    if (window_) {
+        KillTimer(window_, kExpandTimerId);
+        Relayout();
+        InvalidateRect(window_, nullptr, FALSE);
+    }
+}
+
+void TipWindow::Relayout() {
+    // The truncation notice belongs to the unfiltered list; once a filter is
+    // on, the tail it refers to has been searched too.
+    const int listed = static_cast<int>(rows_.size()) + ((truncated_ && filter_.empty()) ? 1 : 0);
+    const int room = (work_area_.bottom - work_area_.top) / std::max(row_height_, 1) - 1;
+    visible_rows_ = std::clamp(std::max(listed, 1), 1, std::min(kMaxRows, std::max(room, 1)));
+    footer_height_ = filter_.empty() ? 0 : row_height_;
+
+    RECT rect{};
+    GetWindowRect(window_, &rect);
+    const int height = visible_rows_ * row_height_ + footer_height_ + 2;
+    int y = rect.top;
+    if (y + height > work_area_.bottom) {
+        y = std::max<int>(work_area_.top, work_area_.bottom - height);
+    }
+    SetWindowPos(window_, HWND_TOPMOST, rect.left, y, rect.right - rect.left, height,
+                 SWP_NOACTIVATE);
+
+    const RECT placed{rect.left, y, rect.right, y + height};
+    UnionRect(&footprint_, &footprint_, &placed);
 }
 
 void TipWindow::ClearHover() {
@@ -245,22 +360,27 @@ void TipWindow::OnMouseMove(POINT client_pt) {
 
 const ShellEntry* TipWindow::Selected() const {
     if (hover_ < 0 || hover_ >= static_cast<int>(entries_.size())) return nullptr;
+    if (PositionOf(hover_) < 0) return nullptr;
     return &entries_[hover_];
 }
 
 void TipWindow::EnsureVisible(int index) {
-    if (index < scroll_) {
-        scroll_ = index;
-    } else if (index >= scroll_ + visible_rows_) {
-        scroll_ = index - visible_rows_ + 1;
+    const int position = PositionOf(index);
+    if (position < 0) return;
+    if (position < scroll_) {
+        scroll_ = position;
+    } else if (position >= scroll_ + visible_rows_) {
+        scroll_ = position - visible_rows_ + 1;
     }
-    const int max_scroll = std::max(0, static_cast<int>(entries_.size()) - visible_rows_);
+    const int max_scroll = std::max(0, static_cast<int>(rows_.size()) - visible_rows_);
     scroll_ = std::clamp(scroll_, 0, max_scroll);
 }
 
 void TipWindow::SetSelection(int index) {
-    if (entries_.empty()) return;
-    const int clamped = std::clamp(index, 0, static_cast<int>(entries_.size()) - 1);
+    if (rows_.empty()) return;
+    int position = PositionOf(index);
+    if (position < 0) position = 0;  // no longer listed: fall back to the top
+    const int clamped = rows_[std::clamp(position, 0, static_cast<int>(rows_.size()) - 1)];
     if (clamped == hover_) return;
 
     hover_ = clamped;
@@ -274,11 +394,15 @@ void TipWindow::SetSelection(int index) {
 }
 
 void TipWindow::MoveSelection(int delta) {
-    SetSelection(hover_ < 0 ? 0 : hover_ + delta);
+    if (rows_.empty()) return;
+    const int position = PositionOf(hover_);
+    const int next = std::clamp(position < 0 ? 0 : position + delta, 0,
+                                static_cast<int>(rows_.size()) - 1);
+    SetSelection(rows_[next]);
 }
 
 void TipWindow::OnWheel(int delta) {
-    const int rows = static_cast<int>(entries_.size());
+    const int rows = static_cast<int>(rows_.size());
     if (rows <= visible_rows_) return;
     const int max_scroll = rows - visible_rows_;
     const int previous = scroll_;
@@ -314,23 +438,35 @@ void TipWindow::OnPaint() {
     const HGDIOBJ old_font = SelectObject(memory, font_);
     SetBkMode(memory, TRANSPARENT);
 
-    const int count = static_cast<int>(entries_.size());
+    const int listed = static_cast<int>(rows_.size());
     for (int slot = 0; slot < visible_rows_; ++slot) {
-        const int index = scroll_ + slot;
+        const int position = scroll_ + slot;
         RECT row{1, 1 + slot * row_height_, client.right - 1, 1 + (slot + 1) * row_height_};
 
-        if (index >= count) {
-            if (truncated_ && index == count) {
+        const int index = EntryAt(position);
+        if (index < 0) {
+            const wchar_t* note = nullptr;
+            if (listed == 0 && position == 0) {
+                note = L"no matches";
+            } else if (truncated_ && filter_.empty() && position == listed) {
+                note = L"more items not shown";
+            }
+            if (note) {
                 SetTextColor(memory, palette.dim);
                 RECT text = row;
                 text.left += text_left_;
-                DrawTextW(memory, L"more items not shown", -1, &text,
+                DrawTextW(memory, note, -1, &text,
                           DT_SINGLELINE | DT_VCENTER | DT_END_ELLIPSIS | DT_NOPREFIX);
             }
             continue;
         }
 
-        const ShellEntry& entry = entries_[index];
+        ShellEntry& entry = entries_[index];
+        if (entry.icon_index == kIconDeferred) {
+            // Resolved as it is drawn rather than as the folder was read: at
+            // most a screenful of rows ever needs one.
+            entry.icon_index = entry.parsing_path.empty() ? -1 : IconIndexFor(entry.parsing_path);
+        }
 
         if (index == hover_) {
             const HBRUSH highlight = CreateSolidBrush(palette.hover);
@@ -374,6 +510,30 @@ void TipWindow::OnPaint() {
             SelectObject(memory, old_pen);
             DeleteObject(pen);
         }
+    }
+
+    if (footer_height_ > 0) {
+        // The tip never has focus, so nothing else would tell the user why the
+        // list just shrank. This says what was typed and how much survived it.
+        RECT footer{1, client.bottom - footer_height_ - 1, client.right - 1, client.bottom - 1};
+        const HBRUSH band = CreateSolidBrush(palette.hover);
+        FillRect(memory, &footer, band);
+        DeleteObject(band);
+
+        RECT text = footer;
+        text.left += pad_;
+        SetTextColor(memory, palette.text);
+        const std::wstring typed = L"Filter: " + filter_;
+        DrawTextW(memory, typed.c_str(), -1, &text,
+                  DT_SINGLELINE | DT_VCENTER | DT_END_ELLIPSIS | DT_NOPREFIX);
+
+        RECT tally = footer;
+        tally.right -= pad_;
+        SetTextColor(memory, palette.dim);
+        const std::wstring counts =
+            std::to_wstring(rows_.size()) + L" of " + std::to_wstring(entries_.size());
+        DrawTextW(memory, counts.c_str(), -1, &tally,
+                  DT_SINGLELINE | DT_VCENTER | DT_RIGHT | DT_NOPREFIX);
     }
 
     SelectObject(memory, old_font);

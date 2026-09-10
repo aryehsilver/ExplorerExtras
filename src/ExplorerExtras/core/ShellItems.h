@@ -40,10 +40,21 @@ bool ResolveChild(const std::wstring& folder_path, const std::wstring& child_dis
 bool ResolveChildFolder(const std::wstring& folder_path, const std::wstring& child_display_name,
                         std::wstring* child_path);
 
+// An icon that has not been looked up yet. Whoever draws the row resolves it.
+inline constexpr int kIconDeferred = -2;
+
 // Folders first, then files, each in Explorer's natural sort order. Stops after
 // |max_entries|; |truncated| reports whether more existed.
+//
+// With |defer_icons|, rows come back marked kIconDeferred instead: an icon
+// costs a file open, and for an executable an icon resource is parsed out of
+// it, so a folder of binaries takes seconds to read. Worth it when the listing
+// is far larger than the part that will ever be drawn.
 std::vector<ShellEntry> EnumerateFolder(const std::wstring& folder_path, size_t max_entries,
-                                        bool* truncated);
+                                        bool* truncated, bool defer_icons = false);
+
+// The row's icon, for a listing that deferred them.
+int IconIndexFor(const std::wstring& path);
 
 // The shared system small-icon image list. Never destroy it.
 // The count annotation for a folder row: "3 folders, 12 files", or

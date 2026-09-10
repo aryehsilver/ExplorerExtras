@@ -19,6 +19,32 @@ bool IsNavigationKey(DWORD vk) {
     }
 }
 
+// Anything that can narrow a list of file names: letters, digits, and the
+// punctuation that turns up in them. Backspace rubs out the last one.
+bool IsFilterKey(DWORD vk) {
+    if (vk >= 'A' && vk <= 'Z') return true;
+    if (vk >= '0' && vk <= '9') return true;
+    if (vk >= VK_NUMPAD0 && vk <= VK_NUMPAD9) return true;
+    switch (vk) {
+        case VK_SPACE:
+        case VK_BACK:
+        case VK_OEM_1:
+        case VK_OEM_2:
+        case VK_OEM_3:
+        case VK_OEM_4:
+        case VK_OEM_5:
+        case VK_OEM_6:
+        case VK_OEM_7:
+        case VK_OEM_PLUS:
+        case VK_OEM_COMMA:
+        case VK_OEM_MINUS:
+        case VK_OEM_PERIOD:
+            return true;
+        default:
+            return false;
+    }
+}
+
 // A tip can be on screen while the user is working in another application -
 // hovering does not move focus. Only borrow keys when Explorer actually has
 // focus, or we would steal the arrow keys from whatever they are typing in.
@@ -32,10 +58,15 @@ bool ExplorerHasFocus() {
 }
 
 // A shortcut is never ours - Ctrl+C, Alt+Left and friends belong to Explorer.
-bool AnyModifierHeld() {
+bool ShortcutModifierHeld() {
     return (GetKeyState(VK_CONTROL) & 0x8000) || (GetKeyState(VK_MENU) & 0x8000) ||
-           (GetKeyState(VK_SHIFT) & 0x8000) || (GetKeyState(VK_LWIN) & 0x8000) ||
-           (GetKeyState(VK_RWIN) & 0x8000);
+           (GetKeyState(VK_LWIN) & 0x8000) || (GetKeyState(VK_RWIN) & 0x8000);
+}
+
+// Shift matters for the arrow keys, which Explorer uses to extend a selection,
+// but not for typing: the filter is matched case insensitively either way.
+bool AnyModifierHeld() {
+    return ShortcutModifierHeld() || (GetKeyState(VK_SHIFT) & 0x8000);
 }
 
 }  // namespace
@@ -85,8 +116,11 @@ LRESULT CALLBACK KeyboardHook::HookProc(int code, WPARAM wparam, LPARAM lparam) 
             const bool down = wparam == WM_KEYDOWN || wparam == WM_SYSKEYDOWN;
             const bool up = wparam == WM_KEYUP || wparam == WM_SYSKEYUP;
 
-            if (down && IsNavigationKey(vk) && !AnyModifierHeld() &&
-                KeyboardCaptureEnabled().load(std::memory_order_relaxed) && ExplorerHasFocus()) {
+            const bool ours = (IsNavigationKey(vk) && !AnyModifierHeld()) ||
+                              (IsFilterKey(vk) && !ShortcutModifierHeld());
+
+            if (down && ours && KeyboardCaptureEnabled().load(std::memory_order_relaxed) &&
+                ExplorerHasFocus()) {
                 instance_->swallowed_[vk] = true;
                 PostMessageW(instance_->target_, instance_->message_, vk, 0);
                 return 1;  // swallow: Explorer must not also move its selection

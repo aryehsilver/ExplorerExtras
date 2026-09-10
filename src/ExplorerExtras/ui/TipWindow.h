@@ -11,6 +11,7 @@
 #include <windows.h>
 
 #include <functional>
+#include <string>
 #include <vector>
 
 #include "../core/ShellItems.h"
@@ -43,8 +44,24 @@ public:
 
     HWND Handle() const { return window_; }
     const std::vector<ShellEntry>& entries() const { return entries_; }
+    bool Truncated() const { return truncated_; }
+
+    // What this popup is listing. Only set for the sake of going back to the
+    // folder later - a tip is otherwise built once and never re-reads it.
+    void SetFolder(std::wstring path) { folder_ = std::move(path); }
+    const std::wstring& Folder() const { return folder_; }
+
+    // A longer listing for the same folder, keeping the window's size and
+    // position. Used when a filter has to search past a truncated list.
+    void ReplaceEntries(std::vector<ShellEntry> entries, bool truncated);
 
     RECT WindowRect() const;
+    // Every position this popup has occupied. A tip that has been filtered down
+    // is smaller than the space the pointer was resting in when the typing
+    // started, and that space still belongs to it.
+    const RECT& FootprintRect() const { return footprint_; }
+    // What the popup was opened from: the row, or the tab it hangs beneath.
+    const RECT& AnchorRect() const { return anchor_; }
     bool ContainsPoint(POINT screen_pt) const;
     RECT RowRect(int index) const;  // screen coordinates
 
@@ -63,6 +80,12 @@ public:
 
     void ClearHover();
 
+    // Narrows the list to the names containing |text|, case insensitively.
+    // The window resizes to what is left and grows a footer showing the text,
+    // since the tip never has focus and nothing else would explain the change.
+    void SetFilter(const std::wstring& text);
+    const std::wstring& Filter() const { return filter_; }
+
     // Keyboard-driven selection. Unlike hovering, this never starts the dwell
     // timers - arrow keys move, and only Right/Enter act.
     void SetSelection(int index);
@@ -72,6 +95,14 @@ public:
 
 private:
     void EnsureVisible(int index);
+    void ApplyFilter();
+    void MeasureCountColumn();
+    void Relayout();
+    // rows_ holds the entry indices currently listed, so a position in the
+    // list and an index into entries_ are different numbers whenever a filter
+    // is on. Callbacks and hover_ always speak in entry indices.
+    int PositionOf(int entry_index) const;
+    int EntryAt(int position) const;
 
     static LRESULT CALLBACK WndProc(HWND window, UINT message, WPARAM wparam, LPARAM lparam);
 
@@ -84,7 +115,13 @@ private:
 
     HWND window_ = nullptr;
     HFONT font_ = nullptr;
+    RECT anchor_{};
+    RECT footprint_{};
     std::vector<ShellEntry> entries_;
+    std::vector<int> rows_;
+    std::wstring filter_;
+    std::wstring folder_;
+    RECT work_area_{};
     bool truncated_ = false;
     bool dark_ = false;
 
@@ -96,6 +133,7 @@ private:
     int chevron_ = 16;
     int count_column_ = 0;  // width reserved for the folder item counts
     int visible_rows_ = 0;
+    int footer_height_ = 0;
     int scroll_ = 0;
     int hover_ = -1;
 

@@ -105,6 +105,16 @@ top-left corner is cut to the tab's own radius with fractional coverage so the
 curve is not jagged. `SetLayeredWindowAttributes` can only apply one alpha to a
 whole window, which is why it is not used here.
 
+**Leaving** is deliberately forgiving. The pointer travelling from a row to what
+that row opened rarely goes in a straight line, and an exact hit test makes the
+popup vanish mid-journey — the common way to lose a preview is to clip the
+corner of the gap on the way to it. So the pointer is allowed to be anywhere in
+any open window, the row it came from, the corridor between each of those pairs,
+or within 16dip of any of them, and it has 800ms outside all of that before
+anything closes. A tip that has been filtered down counts by the largest
+footprint it has had rather than its current size, so shrinking the window does
+not move the pointer out from under itself.
+
 **Right-click** any row, or the preview, for Explorer's own context menu —
 the real `IContextMenu`, so every installed shell extension is in it. **Drag**
 any row or preview and it becomes a real OLE drag source via `SHDoDragDrop`,
@@ -117,10 +127,26 @@ itself out from under the menu.
 level (and closes at the first), Enter opens, Escape dismisses. The top row is
 selected when a tip appears.
 
+**Typing filters the list.** Any letter, digit or punctuation narrows the tip to
+the names containing what has been typed, matched case-insensitively and
+anywhere in the name rather than only at the start; backspace rubs out a
+character and Escape clears the filter before it dismisses anything. A footer
+appears with the text and how many of the folder's items survived it, since the
+tip has no focus and nothing else would explain the list changing.
+
+A filter searches the whole folder, not the 300 items a tip lists: on the first
+keystroke a truncated listing is re-read in full, so a name that is there is
+never reported missing. That re-read defers row icons — `SHGetFileInfoW` opens
+each file and parses an icon resource out of every executable, which is three
+seconds for `System32` and 66 milliseconds without — and the rows that end up
+on screen resolve theirs as they are drawn.
+
 Since the tip never takes focus it receives no key input, so `KeyboardHook`
-borrows the navigation keys — but only while a tip is on screen, and never when
-Ctrl/Alt/Shift/Win is held, so Explorer's own shortcuts are untouched. It also
-swallows the matching key-up, so no application sees a dangling press.
+borrows these keys — but only while a tip is on screen, and never when
+Ctrl/Alt/Win is held, so Explorer's own shortcuts are untouched. (Shift is
+allowed through for typing and blocked for the arrows, which Explorer uses to
+extend a selection.) It also swallows the matching key-up, so no application
+sees a dangling press.
 
 **Activating a folder** uses the `opennewtab` verb registered under
 `HKCR\Folder\shell`, so it opens as a tab in the existing window rather than a
