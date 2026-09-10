@@ -5,8 +5,8 @@
 IDI_APPICON ICON "assets\\app.ico"
 
 VS_VERSION_INFO VERSIONINFO
-FILEVERSION 0, 1, 0, 0
-PRODUCTVERSION 0, 1, 0, 0
+FILEVERSION 0, 4, 0, 0
+PRODUCTVERSION 0, 4, 0, 0
 FILEFLAGSMASK VS_FFI_FILEFLAGSMASK
 FILEFLAGS 0x0L
 FILEOS VOS_NT_WINDOWS32
@@ -18,11 +18,11 @@ BEGIN
         BLOCK "040904b0"
         BEGIN
             VALUE "FileDescription", "Explorer Extras"
-            VALUE "FileVersion", "0.1.0.0"
+            VALUE "FileVersion", "0.4.0.0"
             VALUE "InternalName", "ExplorerExtras"
             VALUE "OriginalFilename", "ExplorerExtras.exe"
             VALUE "ProductName", "Explorer Extras"
-            VALUE "ProductVersion", "0.1.0.0"
+            VALUE "ProductVersion", "0.4.0.0"
         END
     END
     BLOCK "VarFileInfo"
