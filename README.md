@@ -15,6 +15,7 @@ notification area and starts with Windows from then on.
 | The same tip from a tab, an address bar crumb, or the navigation pane | Implemented |
 | Drop files into a tip, springing folders open as you go | Implemented |
 | Type to filter an open tip | Implemented |
+| Recent folders in the tray, to get back to one you closed | Implemented |
 
 ## Subfolder tips
 
@@ -243,6 +244,39 @@ feature that exists only as long as an undocumented interface does is not worth
 shipping. The code attempts the verb anyway and falls back, so it will start
 working if the shell ever exposes it.
 
+## Recent folders
+
+Explorer remembers recent *files*, and pinned folders. It does not offer the
+folders you actually had open, and a tab you closed is gone. The tray menu keeps
+a list of them, most recent first.
+
+Noticing them is nearly free, because the shell already knows: the same
+`IShellWindows` enumeration the tips use lists every window and tab with the
+folder each is showing. The worker looks every two seconds, gated on there being
+an Explorer window at all - the cheapest possible check, and worth it for
+something that runs for as long as the machine is on. Only folders that are new
+since the last look are recorded, or two windows sitting open would shuffle past
+each other in the list on every poll and rewrite the file for it.
+
+Anything currently open is left out of the menu. A list that offers you a folder
+already on screen is noise, and a folder you can see is not one you need help
+getting back to.
+
+**Clicking an entry opens a new window; Ctrl+clicking browses there in the
+Explorer window you were last in.** The second is the closest thing to reopening
+a tab that works from out here, for the reason in "Opening a folder from a tip":
+the shell will not hand out its new-tab verb. It also cannot ask which window
+you meant at the time, because by then the tray owns the foreground and Explorer
+does not - so the tick remembers the last Explorer window that *was* in front,
+which is the only useful answer to "the one I was just in".
+
+The list holds forty and shows a dozen. It lives in `recent.txt` beside the
+settings, which means it is a record of where you have been, in plain text, on
+your own disk - Explorer keeps one of those too, but this is a second copy.
+There is a toggle to stop it being kept and a "Clear the list" to empty it.
+
+![The tray menu showing recent folders](docs/recent-folders.png)
+
 ## What it looks like
 
 Hover a folder and its contents appear beside it. Hover a folder in that list
@@ -413,6 +447,7 @@ so no application is left holding a press that never ended.
 ```
 src/ExplorerExtras/
   core/       ExplorerSession   shell interop, tab and folder resolution
+              RecentFolders     where you have been, for the tray menu
               ViewHitTest       UI Automation hit testing
               ShellItems        reading folders, resolving crumbs and pane entries
               ShellMenu         the shell's own context menu and drag source
@@ -445,6 +480,7 @@ The settings and the log sit next to the executable, falling back to
 copy under Program Files, say.
 
 - Settings: `settings.ini`
+- Recent folders: `recent.txt`, forty at most
 - Log: `ExplorerExtras.log` (capped at 1 MiB)
 - Auto-start: `HKCU\Software\Microsoft\Windows\CurrentVersion\Run`, value
   `ExplorerExtras`. On by default; toggle it from the tray menu.

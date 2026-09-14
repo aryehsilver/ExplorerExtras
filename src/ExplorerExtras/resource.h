@@ -15,3 +15,10 @@
 #define IDM_RESET_PREVIEWS 40011
 #define IDM_MEDIA_AUTOPLAY 40012
 #define IDM_FOLDER_COUNTS 40013
+#define IDM_REMEMBER_RECENT 40014
+#define IDM_CLEAR_RECENT 40015
+
+// The recent folders themselves, one command each. A range rather than an id
+// per entry, since the list is built fresh every time the menu opens.
+#define IDM_RECENT_FIRST 40100
+#define IDM_RECENT_LAST 40131

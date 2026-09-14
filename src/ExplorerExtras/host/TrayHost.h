@@ -7,8 +7,11 @@
 #include <windows.h>
 #include <shellapi.h>
 
+#include <vector>
+
 #include "../core/KeyboardHook.h"
 #include "../core/MouseHook.h"
+#include "../core/RecentFolders.h"
 #include "../core/Settings.h"
 #include "../core/Worker.h"
 
@@ -22,6 +25,7 @@ public:
 
 private:
     static LRESULT CALLBACK WndProc(HWND window, UINT message, WPARAM wparam, LPARAM lparam);
+    void AppendRecentMenu(HMENU menu);
 
     void OnCommand(UINT id);
     void ShowContextMenu();
@@ -38,6 +42,9 @@ private:
 
     Settings settings_;
     Worker worker_;
+
+    // Rebuilt every time the tray menu opens; the command ids index into it.
+    std::vector<RecentFolder> recent_;
     MouseHook hook_;
     KeyboardHook keyboard_hook_;
 };

@@ -2,9 +2,15 @@
 
 #include <objbase.h>
 
+#include <algorithm>
 #include <new>
+#include <string>
+#include <vector>
 
+#include "ExplorerSession.h"
 #include "Logging.h"
+#include "RecentFolders.h"
+#include "Settings.h"
 
 namespace ee {
 namespace {
@@ -171,6 +177,16 @@ LRESULT CALLBACK Worker::WndProc(HWND window, UINT message, WPARAM wparam, LPARA
                                              reinterpret_cast<HBITMAP>(lparam));
             return 0;
 
+        case kMsgOpenFolder: {
+            auto* path = reinterpret_cast<std::wstring*>(lparam);
+            if (path) {
+                if (self) self->subfolder_tip_.Dismiss();
+                OpenRecentFolder(*path, wparam != 0);
+                delete path;
+            }
+            return 0;
+        }
+
         case kMsgResetPreview:
             self->subfolder_tip_.ResetPreviewHandler();
             return 0;
@@ -184,9 +200,58 @@ LRESULT CALLBACK Worker::WndProc(HWND window, UINT message, WPARAM wparam, LPARA
     }
 }
 
+// Two seconds between looks. Folders do not change that fast, and each look is
+// a cross-process enumeration of every Explorer window.
+constexpr int kPollTicks = 2000 / kTipTickMs;
+
+void Worker::PollOpenFolders() {
+    if (!Config().rememberRecentFolders.load(std::memory_order_relaxed)) return;
+    // Cheapest possible gate: no Explorer window, nothing to enumerate. Worth
+    // it because this runs forever, including all the hours nobody is
+    // browsing anything.
+    if (!FindWindowW(L"CabinetWClass", nullptr)) return;
+
+    LARGE_INTEGER start, frequency;
+    QueryPerformanceCounter(&start);
+
+    std::vector<std::wstring> open = OpenFolders();
+
+    // Only what is new since the last look. Noting everything every time would
+    // shuffle two open windows past each other on every poll, and rewrite the
+    // file for it - twice a second, forever, for a list nobody changed.
+    for (const std::wstring& folder : open) {
+        const bool seen = std::any_of(last_seen_.begin(), last_seen_.end(),
+                                      [&folder](const std::wstring& previous) {
+                                          return CompareStringOrdinal(previous.c_str(), -1,
+                                                                      folder.c_str(), -1,
+                                                                      TRUE) == CSTR_EQUAL;
+                                      });
+        if (!seen) Recents().Note(folder);
+    }
+    last_seen_ = std::move(open);
+    Recents().Save();
+
+    // This shares a thread with the hover tick and with anything a drag is
+    // doing, so it has no business being slow. Silent unless it is.
+    LARGE_INTEGER now;
+    QueryPerformanceCounter(&now);
+    QueryPerformanceFrequency(&frequency);
+    const double elapsed = (now.QuadPart - start.QuadPart) * 1000.0 / frequency.QuadPart;
+    if (elapsed > 50.0) EE_INFO(L"recent folders: the look round took %.0fms", elapsed);
+}
+
 void Worker::OnTick() {
     POINT cursor{};
     if (!GetCursorPos(&cursor)) return;
+
+    // Cheap enough for every tick, and it has to be: the answer is wanted at
+    // the moment the user opens a menu, long after they left Explorer.
+    NoteForegroundExplorer(GetForegroundWindow());
+
+    if (++ticks_since_poll_ >= kPollTicks) {
+        ticks_since_poll_ = 0;
+        PollOpenFolders();
+    }
 
     if (cursor.x == last_tick_pt_.x && cursor.y == last_tick_pt_.y) {
         still_ms_ += kTipTickMs;

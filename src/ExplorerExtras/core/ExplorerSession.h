@@ -16,6 +16,7 @@
 #include <shobjidl.h>
 #include <wrl/client.h>
 
+#include <atomic>
 #include <optional>
 #include <string>
 #include <vector>
@@ -44,6 +45,15 @@ std::optional<ActiveTab> ResolveActiveTab(HWND top_level, HWND tab_window);
 // Parsing path of the tab's current folder.
 std::wstring GetCurrentFolder(const ActiveTab& tab);
 
+// Every folder open in Explorer right now, across every window and tab. Used
+// to notice where the user has been, and to leave what is already on screen
+// out of a list of places to go back to.
+std::vector<std::wstring> OpenFolders();
+
+// The frontmost tab of |top_level| by Z-order, or null where the window has no
+// tab children. As good an answer as Windows allows - see TabFolders.
+HWND FrontTabWindow(HWND top_level);
+
 // The folder each of |top_level|'s tabs is showing, the frontmost first.
 //
 // For a hover on the frame's own chrome - the address bar, the tab strip -
@@ -63,6 +73,19 @@ std::wstring FindTabFolder(HWND top_level, const std::wstring& tab_name);
 // folder each is showing. This is the view that decides which tab a hover on
 // the frame's own chrome belongs to.
 std::wstring DescribeTabs(HWND top_level);
+
+// Remembers that |frame| was the Explorer window in front. Called from the
+// tick, because by the time the user has opened the tray menu and picked
+// something from it the foreground window is the tray, and "the window I was
+// just in" is the only useful answer to where a folder should open.
+void NoteForegroundExplorer(HWND frame);
+HWND LastForegroundExplorer();
+
+// Opens |path| for the tray's recent list. With |in_front_tab|, the Explorer
+// window in front browses there instead - the nearest thing to reopening a
+// tab that works from outside Explorer, since the new-tab verb does not.
+// Falls back to a window when there is no Explorer window to browse.
+void OpenRecentFolder(const std::wstring& path, bool in_front_tab);
 
 // Browses to the parent folder in place. Fails harmlessly at a namespace root.
 HRESULT NavigateUp(const ActiveTab& tab);

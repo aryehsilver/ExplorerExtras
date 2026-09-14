@@ -200,6 +200,64 @@ std::wstring GetCurrentFolder(const ActiveTab& tab) {
     return CurrentFolderOf(tab.browser.Get());
 }
 
+HWND FrontTabWindow(HWND top_level) {
+    if (!top_level) return nullptr;
+
+    HWND front = nullptr;
+    EnumChildWindows(
+        top_level,
+        [](HWND child, LPARAM param) -> BOOL {
+            if (!ClassNameIs(child, kTabWindowClass)) return TRUE;
+            *reinterpret_cast<HWND*>(param) = child;
+            return FALSE;  // EnumChildWindows walks Z-order: the first is the front
+        },
+        reinterpret_cast<LPARAM>(&front));
+    return front;
+}
+
+std::vector<std::wstring> OpenFolders() {
+    std::vector<std::wstring> folders;
+
+    ComPtr<IShellWindows> shell_windows;
+    if (FAILED(CoCreateInstance(CLSID_ShellWindows, nullptr, CLSCTX_ALL,
+                                IID_PPV_ARGS(&shell_windows)))) {
+        return folders;
+    }
+
+    long count = 0;
+    if (FAILED(shell_windows->get_Count(&count))) return folders;
+
+    for (long i = 0; i < count; ++i) {
+        VARIANT index;
+        VariantInit(&index);
+        index.vt = VT_I4;
+        index.lVal = i;
+
+        ComPtr<IDispatch> dispatch;
+        const HRESULT hr = shell_windows->Item(index, &dispatch);
+        VariantClear(&index);
+        if (FAILED(hr) || !dispatch) continue;
+
+        // Only File Explorer: IShellWindows also lists Internet Explorer
+        // windows on machines that still have one.
+        ComPtr<IWebBrowser2> web_browser;
+        if (FAILED(dispatch.As(&web_browser))) continue;
+        SHANDLE_PTR frame = 0;
+        if (FAILED(web_browser->get_HWND(&frame))) continue;
+        if (!IsExplorerWindow(reinterpret_cast<HWND>(frame))) continue;
+
+        ComPtr<IServiceProvider> provider;
+        if (FAILED(dispatch.As(&provider))) continue;
+
+        ComPtr<IShellBrowser> browser;
+        if (FAILED(provider->QueryService(SID_STopLevelBrowser, IID_PPV_ARGS(&browser)))) continue;
+
+        std::wstring folder = CurrentFolderOf(browser.Get());
+        if (!folder.empty()) folders.push_back(std::move(folder));
+    }
+    return folders;
+}
+
 std::vector<std::wstring> TabFolders(HWND top_level) {
     std::vector<std::wstring> folders;
     if (!top_level) return folders;
@@ -399,6 +457,48 @@ std::wstring FindTabFolder(HWND top_level, const std::wstring& tab_name) {
         }
     }
     return {};
+}
+
+namespace {
+// Written by the worker tick, read when the tray acts. A handle is a word; the
+// worst a torn read could do is fail the IsWindow check below.
+std::atomic<HWND> g_last_explorer_frame{nullptr};
+}  // namespace
+
+void NoteForegroundExplorer(HWND frame) {
+    if (IsExplorerWindow(frame)) g_last_explorer_frame.store(frame, std::memory_order_relaxed);
+}
+
+HWND LastForegroundExplorer() {
+    const HWND frame = g_last_explorer_frame.load(std::memory_order_relaxed);
+    // It may have been closed since, in which case there is nothing to browse.
+    return (frame && IsWindow(frame) && IsExplorerWindow(frame)) ? frame : nullptr;
+}
+
+void OpenRecentFolder(const std::wstring& path, bool in_front_tab) {
+    if (path.empty()) return;
+
+    if (in_front_tab) {
+        // The foreground is the tray by now, so this is the window the user was
+        // in before they went looking for the menu.
+        const HWND frame = LastForegroundExplorer();
+        if (IsExplorerWindow(frame)) {
+            if (const auto tab = ResolveActiveTab(frame, FrontTabWindow(frame))) {
+                PIDLIST_ABSOLUTE pidl = nullptr;
+                if (SUCCEEDED(SHParseDisplayName(path.c_str(), nullptr, &pidl, 0, nullptr))) {
+                    const HRESULT hr =
+                        tab->browser->BrowseObject(pidl, SBSP_SAMEBROWSER | SBSP_ABSOLUTE);
+                    CoTaskMemFree(pidl);
+                    EE_INFO(L"recent: browsed the front tab to '%s' hr=0x%08X", path.c_str(), hr);
+                    if (SUCCEEDED(hr)) return;
+                }
+            }
+        }
+        // Nothing in front to browse: a window is better than doing nothing.
+    }
+
+    EE_INFO(L"recent: opening '%s' in a window", path.c_str());
+    ShellExecuteW(nullptr, L"open", path.c_str(), nullptr, nullptr, SW_SHOWNORMAL);
 }
 
 HRESULT NavigateUp(const ActiveTab& tab) {

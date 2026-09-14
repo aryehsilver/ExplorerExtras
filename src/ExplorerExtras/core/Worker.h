@@ -7,6 +7,9 @@
 
 #include <windows.h>
 
+#include <string>
+#include <vector>
+
 #include "../features/NavigateUpFeature.h"
 #include "../features/SubfolderTipFeature.h"
 #include "ViewHitTest.h"
@@ -18,6 +21,10 @@ inline constexpr UINT kMsgDiagnostics = WM_APP + 2;  // lParam = POINT*
 inline constexpr UINT kMsgKey = WM_APP + 3;          // wParam = virtual key code
 inline constexpr UINT kMsgThumbnail = WM_APP + 4;    // wParam = token, lParam = HBITMAP
 inline constexpr UINT kMsgResetPreview = WM_APP + 5;  // release the retained preview handler
+// lParam = a heap std::wstring* of the folder to open; wParam != 0 to browse
+// there in the front tab rather than opening a window. Shell work belongs on
+// the worker, so the tray posts rather than calling.
+inline constexpr UINT kMsgOpenFolder = WM_APP + 6;
 
 class Worker {
 public:
@@ -41,6 +48,9 @@ private:
     static LRESULT CALLBACK WndProc(HWND window, UINT message, WPARAM wparam, LPARAM lparam);
     void Run();
     void OnTick();
+    // Notices where Explorer is, for the recent folders list. Runs on a much
+    // slower beat than the hover tick: this is a cross-process enumeration.
+    void PollOpenFolders();
 
     HANDLE thread_ = nullptr;
     HANDLE ready_ = nullptr;
@@ -53,6 +63,9 @@ private:
 
     POINT last_tick_pt_{};
     DWORD still_ms_ = 0;
+    int ticks_since_poll_ = 0;
+    // What Explorer had open at the last look, so only changes are recorded.
+    std::vector<std::wstring> last_seen_;
 };
 
 }  // namespace ee

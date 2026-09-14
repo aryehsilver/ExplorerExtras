@@ -6,6 +6,7 @@
 #include <cwchar>
 #include <string>
 
+#include "../core/ExplorerSession.h"
 #include "../core/Logging.h"
 #include "../core/Paths.h"
 #include "../resource.h"
@@ -18,6 +19,9 @@ constexpr wchar_t kHostClassName[] = L"ExplorerExtras.Host";
 constexpr wchar_t kAppTitle[] = L"Explorer Extras";
 constexpr UINT kTrayCallbackMessage = WM_APP + 10;
 constexpr UINT_PTR kDiagnosticsTimerId = 1;
+
+// A dozen is a menu; more is a list that wants searching instead.
+constexpr size_t kMaxRecentShown = 12;
 constexpr UINT kDiagnosticsDelayMs = 3000;
 
 }  // namespace
@@ -27,6 +31,7 @@ bool TrayHost::Start(HINSTANCE instance) {
 
     settings_ = LoadSettings();
     ApplyToConfig(settings_);
+    Recents().Load();
 
     // Make the registry match the saved preference. On a first run this is what
     // registers the app to start with Windows.
@@ -159,6 +164,8 @@ void TrayHost::ShowContextMenu() {
                          : MF_GRAYED),
                 IDM_MEDIA_AUTOPLAY, L"    Start playing on hover");
     AppendMenuW(menu, MF_SEPARATOR, 0, nullptr);
+    AppendRecentMenu(menu);
+    AppendMenuW(menu, MF_SEPARATOR, 0, nullptr);
     AppendMenuW(menu, MF_STRING | (settings_.runAtStartup ? MF_CHECKED : MF_UNCHECKED),
                 IDM_RUN_AT_STARTUP, L"Start with Windows");
     AppendMenuW(menu, MF_STRING, IDM_RESET_PREVIEWS, L"Reset file previews");
@@ -175,12 +182,64 @@ void TrayHost::ShowContextMenu() {
     DestroyMenu(menu);
 }
 
+void TrayHost::AppendRecentMenu(HMENU menu) {
+    recent_.clear();
+    if (!settings_.rememberRecentFolders) {
+        AppendMenuW(menu, MF_STRING | MF_GRAYED, 0, L"Recent folders (off)");
+        return;
+    }
+
+    // Built fresh each time the menu opens. Enumerating what is open is a
+    // cross-process call, but this is a menu the user asked for by hand.
+    recent_ = Recents().List(OpenFolders(), kMaxRecentShown);
+
+    const HMENU submenu = CreatePopupMenu();
+    if (!submenu) return;
+
+    if (recent_.empty()) {
+        // "Nothing yet" is a lie when the list is full and every one of them is
+        // on screen, which is exactly the state after a busy morning.
+        const bool anything_remembered = !Recents().List({}, 1).empty();
+        AppendMenuW(submenu, MF_STRING | MF_GRAYED, 0,
+                    anything_remembered ? L"All of them are open" : L"Nothing yet");
+    } else {
+        for (size_t i = 0; i < recent_.size(); ++i) {
+            // Name first, then where it lives, right aligned: the same shape
+            // as a menu with shortcut keys, and it reads as one column of
+            // names rather than a wall of paths.
+            std::wstring text = recent_[i].display;
+            if (!recent_[i].context.empty()) text += L"\t" + recent_[i].context;
+            AppendMenuW(submenu, MF_STRING, IDM_RECENT_FIRST + static_cast<UINT>(i), text.c_str());
+        }
+        AppendMenuW(submenu, MF_SEPARATOR, 0, nullptr);
+        AppendMenuW(submenu, MF_STRING, IDM_CLEAR_RECENT, L"Clear the list");
+    }
+    AppendMenuW(submenu, MF_SEPARATOR, 0, nullptr);
+    AppendMenuW(submenu, MF_STRING | MF_CHECKED, IDM_REMEMBER_RECENT, L"Remember recent folders");
+
+    AppendMenuW(menu, MF_POPUP, reinterpret_cast<UINT_PTR>(submenu),
+                L"Recent folders\tCtrl: open in this tab");
+}
+
 void TrayHost::PersistAndApply() {
     SaveSettings(settings_);
     ApplyToConfig(settings_);
 }
 
 void TrayHost::OnCommand(UINT id) {
+
+    if (id >= IDM_RECENT_FIRST && id <= IDM_RECENT_LAST) {
+        const size_t index = id - IDM_RECENT_FIRST;
+        if (index >= recent_.size()) return;
+        // Ctrl means "go there in the tab I am in" rather than opening a
+        // window - the closest thing to reopening a tab that works from out
+        // here, since the shell will not hand out its new-tab verb.
+        const bool in_front_tab = (GetKeyState(VK_CONTROL) & 0x8000) != 0;
+        PostMessageW(worker_.MessageWindow(), kMsgOpenFolder, in_front_tab ? 1 : 0,
+                     reinterpret_cast<LPARAM>(new std::wstring(recent_[index].path)));
+        return;
+    }
+
     switch (id) {
         case IDM_ENABLED:
             settings_.enabled = !settings_.enabled;
@@ -265,6 +324,16 @@ void TrayHost::OnCommand(UINT id) {
         case IDM_DIAGNOSTICS:
             ShowBalloon(kAppTitle, L"Move the pointer over Explorer. Capturing in 3 seconds.");
             SetTimer(window_, kDiagnosticsTimerId, kDiagnosticsDelayMs, nullptr);
+            break;
+
+        case IDM_REMEMBER_RECENT:
+            settings_.rememberRecentFolders = !settings_.rememberRecentFolders;
+            PersistAndApply();
+            break;
+
+        case IDM_CLEAR_RECENT:
+            Recents().Clear();
+            Recents().Save();
             break;
 
         case IDM_EXIT:

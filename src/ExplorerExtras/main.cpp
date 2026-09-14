@@ -6,6 +6,7 @@
 // untouched.
 
 #include <windows.h>
+#include <objbase.h>
 
 #include "core/Logging.h"
 #include "core/Paths.h"
@@ -26,6 +27,14 @@ int APIENTRY wWinMain(_In_ HINSTANCE instance, _In_opt_ HINSTANCE, _In_ LPWSTR, 
     ee::log::Init();
     EE_INFO(L"Explorer Extras starting, exe=%s", ee::ExecutablePath().c_str());
 
+    // The tray thread does shell work of its own - the icon, ShellExecute, and
+    // enumerating what Explorer has open to build the recent folders menu - and
+    // all of it wants an apartment. The worker has its own, this is the main
+    // thread's. Apartment-threaded, like every thread here that touches the
+    // shell: from an MTA the browser interfaces hand back null handles.
+    const HRESULT com = CoInitializeEx(nullptr, COINIT_APARTMENTTHREADED | COINIT_DISABLE_OLE1DDE);
+    if (FAILED(com)) EE_ERR(L"CoInitializeEx failed on the main thread, hr=0x%08X", com);
+
     int exit_code = 0;
     {
         ee::TrayHost host;
@@ -37,6 +46,8 @@ int APIENTRY wWinMain(_In_ HINSTANCE instance, _In_opt_ HINSTANCE, _In_ LPWSTR, 
         }
         host.Stop();
     }
+
+    if (SUCCEEDED(com)) CoUninitialize();
 
     EE_INFO(L"Explorer Extras stopped");
     ee::log::Shutdown();

@@ -16,6 +16,8 @@ struct Settings {
     // Only meaningful when mediaPlayback is on: whether hovering starts
     // playback, or opens the preview paused waiting for the play button.
     bool mediaAutoPlay = true;
+    // Keep a list of folders that have been open, for the tray menu to offer.
+    bool rememberRecentFolders = true;
     bool runAtStartup = true;
 };
 
@@ -33,6 +35,7 @@ struct RuntimeConfig {
     std::atomic<bool> filePreviews{true};
     std::atomic<bool> mediaPlayback{true};
     std::atomic<bool> mediaAutoPlay{true};
+    std::atomic<bool> rememberRecentFolders{true};
 };
 
 RuntimeConfig& Config();

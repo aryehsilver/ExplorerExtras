@@ -95,6 +95,7 @@
     <ClCompile Include="core\MouseHook.cpp" />
     <ClCompile Include="core\ThumbnailLoader.cpp" />
     <ClCompile Include="core\Paths.cpp" />
+    <ClCompile Include="core\RecentFolders.cpp" />
     <ClCompile Include="core\Settings.cpp" />
     <ClCompile Include="core\ShellItems.cpp" />
     <ClCompile Include="core\ShellMenu.cpp" />
@@ -122,6 +123,7 @@
     <ClInclude Include="core\MouseHook.h" />
     <ClInclude Include="core\ThumbnailLoader.h" />
     <ClInclude Include="core\Paths.h" />
+    <ClInclude Include="core\RecentFolders.h" />
     <ClInclude Include="core\Settings.h" />
     <ClInclude Include="core\ShellItems.h" />
     <ClInclude Include="core\ShellMenu.h" />
