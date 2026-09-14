@@ -80,6 +80,11 @@ private:
     bool Create(HINSTANCE instance);
     void BuildControls();  // creates the controls and the fonts
     void Layout();         // places them, and decides what is visible
+    int NaturalWidth();    // the width at which nothing has to ellipsise
+    void SizeToContent();  // the opening size: all of it, or as much as fits
+    void UpdateScrollBar();
+    void ScrollTo(int offset);
+    void EnsureVisible(HWND control);  // scrolls a focused row into view
     void ApplyTheme();
     void OnThemeChanged();
     void PaintCard(NMCUSTOMDRAW* custom, Control& control);
@@ -102,6 +107,12 @@ private:
     bool dark_ = false;
     bool created_ = false;
     UINT dpi_ = 96;
+
+    // The window is resizable and the rows scroll inside it, so that a small
+    // screen gets a window that fits rather than one that runs off the bottom.
+    int scroll_ = 0;          // pixels hidden above the top of the client area
+    int content_height_ = 0;  // how tall the rows are, open groups included
+    bool user_sized_ = false; // whether the window has been resized by hand
 
     std::vector<Control> controls_;
     std::vector<bool> expanded_;  // one per row; only the group headers matter

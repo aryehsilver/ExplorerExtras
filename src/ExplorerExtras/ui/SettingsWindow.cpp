@@ -71,6 +71,7 @@ constexpr int kKnobDip = 12;
 constexpr int kBodyPx = 14;
 constexpr int kNotePx = 12;
 constexpr int kMinWidthDip = 400;
+constexpr int kMinHeightDip = 220;
 constexpr int kMaxWidthDip = 640;
 
 // One command per group header, for the chevron that opens it.
@@ -382,6 +383,13 @@ bool SettingsWindow::Show(HINSTANCE instance, HWND commands, const Settings* set
 
     if (!window_ && !Create(instance)) return false;
 
+    // Reopening starts at the top. The size it was given is kept - that was a
+    // decision - but where it happened to be scrolled to was not.
+    if (!IsWindowVisible(window_) && scroll_ != 0) {
+        scroll_ = 0;
+        Layout();
+    }
+
     Refresh();
     ShowWindow(window_, SW_SHOW);
     // A tray app has no business stealing focus at random, but this window only
@@ -414,12 +422,12 @@ bool SettingsWindow::Create(HINSTANCE instance) {
     created_ = true;
     dark_ = AppsUseDarkTheme();
 
-    // Caption and close button only. The layout is a fixed column of cards, so
-    // a resize grip would do nothing, and a greyed-out maximise button in the
-    // corner is just a button that does not work.
-    window_ = CreateWindowExW(0, kClassName, kTitle, WS_OVERLAPPED | WS_CAPTION | WS_SYSMENU,
-                              CW_USEDEFAULT, CW_USEDEFAULT, 100, 100, nullptr, nullptr, instance,
-                              this);
+    // Resizable, with a scroll bar for when the rows do not fit - a laptop
+    // screen is shorter than this window would like to be. No maximise box:
+    // a column of rows gains nothing from filling a monitor.
+    window_ = CreateWindowExW(
+        0, kClassName, kTitle, WS_OVERLAPPED | WS_CAPTION | WS_SYSMENU | WS_THICKFRAME | WS_VSCROLL,
+        CW_USEDEFAULT, CW_USEDEFAULT, 100, 100, nullptr, nullptr, instance, this);
     if (!window_) {
         EE_ERR(L"settings window failed to create, gle=%lu", GetLastError());
         return false;
@@ -427,7 +435,9 @@ bool SettingsWindow::Create(HINSTANCE instance) {
 
     dpi_ = GetDpiForWindow(window_);
     BuildControls();
-    Layout();
+    Layout();          // measures the content
+    SizeToContent();   // ...so the window can open around it
+    Layout();          // ...and the rows settle into the size they got
     ApplyTheme();
 
     // Open over the pointer's monitor - which is the one the tray icon is on.
@@ -537,13 +547,8 @@ void SettingsWindow::BuildControls() {
     }
 }
 
-void SettingsWindow::Layout() {
-    if (!window_ || controls_.empty()) return;
-
-    const int margin = Scale(kMarginDip, dpi_);
+int SettingsWindow::NaturalWidth() {
     const int chevron_width = Scale(kChevronWidthDip, dpi_);
-
-    // Wide enough for the longest line at this font, within reason.
     const HDC dc = GetDC(window_);
     int widest = 0;
     for (const Row& row : kRows) {
@@ -573,14 +578,36 @@ void SettingsWindow::Layout() {
         widest = std::max(widest, width);
     }
     ReleaseDC(window_, dc);
+    return std::clamp(widest, Scale(kMinWidthDip, dpi_), Scale(kMaxWidthDip, dpi_));
+}
 
-    const int content = std::clamp(widest, Scale(kMinWidthDip, dpi_), Scale(kMaxWidthDip, dpi_));
+void SettingsWindow::Layout() {
+    if (!window_ || controls_.empty()) return;
+
+    const int margin = Scale(kMarginDip, dpi_);
+    const int chevron_width = Scale(kChevronWidthDip, dpi_);
+
+    RECT client{};
+    GetClientRect(window_, &client);
+    // The rows fill the window's width, so widening it widens the cards. Below
+    // the natural width they would start ellipsising, which is what the minimum
+    // size in WM_GETMINMAXINFO is for.
+    const int content = std::max(static_cast<int>(client.right) - margin * 2, NaturalWidth());
     const int left = margin;
+
+    // Everything is placed against the top of the content first, and the scroll
+    // offset applied at the end - the total height is not known until the walk
+    // is over, and it is what the offset has to be clamped against.
+    struct Placement {
+        HWND window;
+        int x, y, width, height;
+    };
+    std::vector<Placement> places;
+    places.reserve(controls_.size());
+
     int y = Scale(kTopMarginDip, dpi_);
     bool first_section = true;
     size_t group = kRowCount;  // the header whose children we are inside
-
-    HDWP defer = BeginDeferWindowPos(static_cast<int>(controls_.size()));
 
     for (size_t index = 0; index < controls_.size(); ++index) {
         Control& control = controls_[index];
@@ -596,7 +623,6 @@ void SettingsWindow::Layout() {
             ShowWindow(control.window, SW_HIDE);
             continue;
         }
-        ShowWindow(control.window, SW_SHOW);
 
         // A chevron and the second button of a pair share a row with the
         // control before them, and are placed by it.
@@ -613,8 +639,7 @@ void SettingsWindow::Layout() {
             case RowKind::Section: {
                 if (!first_section) y += Scale(kSectionTopDip, dpi_);
                 first_section = false;
-                defer = DeferWindowPos(defer, control.window, nullptr, left, y, content,
-                                       Scale(kSectionHeightDip, dpi_), SWP_NOZORDER | SWP_NOACTIVATE);
+                places.push_back({control.window, left, y, content, Scale(kSectionHeightDip, dpi_)});
                 y += Scale(kSectionHeightDip, dpi_) + Scale(kSectionGapDip, dpi_);
                 break;
             }
@@ -634,12 +659,10 @@ void SettingsWindow::Layout() {
                 const bool has_chevron =
                     index + 1 < controls_.size() && controls_[index + 1].chevron;
                 const int row_width = content - (has_chevron ? chevron_width : 0);
-                defer = DeferWindowPos(defer, control.window, nullptr, left, y, row_width, height,
-                                       SWP_NOZORDER | SWP_NOACTIVATE);
+                places.push_back({control.window, left, y, row_width, height});
                 if (has_chevron) {
-                    defer = DeferWindowPos(defer, controls_[index + 1].window, nullptr,
-                                           left + row_width, y, chevron_width, height,
-                                           SWP_NOZORDER | SWP_NOACTIVATE);
+                    places.push_back(
+                        {controls_[index + 1].window, left + row_width, y, chevron_width, height});
                 }
                 y += height;
                 // Rows inside a group are one shape; separate cards are not.
@@ -660,15 +683,13 @@ void SettingsWindow::Layout() {
                 ReleaseDC(window_, measure);
                 control.corners = kTopLeft | kTopRight | kBottomLeft | kBottomRight;
 
-                defer = DeferWindowPos(defer, control.window, nullptr, left, y, width, height,
-                                       SWP_NOZORDER | SWP_NOACTIVATE);
+                places.push_back({control.window, left, y, width, height});
                 // The second button of a pair follows the first one along.
                 if (second > 0 && index + 1 < controls_.size() &&
                     controls_[index + 1].row_index == control.row_index) {
                     controls_[index + 1].corners = control.corners;
-                    defer = DeferWindowPos(defer, controls_[index + 1].window, nullptr,
-                                           left + width + Scale(kButtonGapDip, dpi_), y, second,
-                                           height, SWP_NOZORDER | SWP_NOACTIVATE);
+                    places.push_back({controls_[index + 1].window,
+                                      left + width + Scale(kButtonGapDip, dpi_), y, second, height});
                 }
                 y += height + Scale(kCardGapDip, dpi_);
                 break;
@@ -676,16 +697,98 @@ void SettingsWindow::Layout() {
         }
     }
 
+    content_height_ = y + Scale(kMarginDip, dpi_) - Scale(kCardGapDip, dpi_);
+    const int page = static_cast<int>(client.bottom);
+    scroll_ = std::clamp(scroll_, 0, std::max(0, content_height_ - page));
+
+    HDWP defer = BeginDeferWindowPos(static_cast<int>(places.size()));
+    for (const Placement& place : places) {
+        defer = DeferWindowPos(defer, place.window, nullptr, place.x, place.y - scroll_, place.width,
+                               place.height, SWP_NOZORDER | SWP_NOACTIVATE | SWP_SHOWWINDOW);
+    }
     EndDeferWindowPos(defer);
 
-    y += Scale(kMarginDip, dpi_) - Scale(kCardGapDip, dpi_);
-
-    RECT wanted{0, 0, content + margin * 2, y};
-    AdjustWindowRectExForDpi(&wanted, static_cast<DWORD>(GetWindowLongPtrW(window_, GWL_STYLE)),
-                             FALSE, 0, dpi_);
-    SetWindowPos(window_, nullptr, 0, 0, wanted.right - wanted.left, wanted.bottom - wanted.top,
-                 SWP_NOMOVE | SWP_NOZORDER | SWP_NOACTIVATE);
+    UpdateScrollBar();
     InvalidateRect(window_, nullptr, TRUE);
+}
+
+void SettingsWindow::UpdateScrollBar() {
+    RECT client{};
+    GetClientRect(window_, &client);
+
+    SCROLLINFO info{};
+    info.cbSize = sizeof(info);
+    info.fMask = SIF_RANGE | SIF_PAGE | SIF_POS;
+    info.nMin = 0;
+    info.nMax = std::max(content_height_ - 1, 0);
+    info.nPage = static_cast<UINT>(std::max<LONG>(client.bottom, 1));
+    info.nPos = scroll_;
+    // Without SIF_DISABLENOSCROLL the bar takes itself away when everything
+    // fits, which is the behaviour wanted: no furniture on a big screen.
+    SetScrollInfo(window_, SB_VERT, &info, TRUE);
+}
+
+void SettingsWindow::ScrollTo(int offset) {
+    RECT client{};
+    GetClientRect(window_, &client);
+    const int limit = std::max(0, content_height_ - static_cast<int>(client.bottom));
+    const int wanted = std::clamp(offset, 0, limit);
+    if (wanted == scroll_) return;
+
+    const int delta = scroll_ - wanted;
+    scroll_ = wanted;
+    // Scrolling the window moves the rows with it, children included, which is
+    // smoother than putting each one back by hand.
+    ScrollWindowEx(window_, 0, delta, nullptr, nullptr, nullptr, nullptr,
+                   SW_SCROLLCHILDREN | SW_INVALIDATE | SW_ERASE);
+    UpdateScrollBar();
+    UpdateWindow(window_);
+}
+
+void SettingsWindow::EnsureVisible(HWND control) {
+    if (!control || !window_) return;
+    RECT bounds{};
+    GetWindowRect(control, &bounds);
+    MapWindowPoints(nullptr, window_, reinterpret_cast<POINT*>(&bounds), 2);
+
+    RECT client{};
+    GetClientRect(window_, &client);
+    const int margin = Scale(kCardGapDip, dpi_);
+
+    if (bounds.top < margin) {
+        ScrollTo(scroll_ + bounds.top - margin);
+    } else if (bounds.bottom > client.bottom - margin) {
+        ScrollTo(scroll_ + bounds.bottom - client.bottom + margin);
+    }
+}
+
+void SettingsWindow::SizeToContent() {
+    // Open showing everything, unless that would be taller than the screen -
+    // in which case open as tall as the screen sensibly allows and let the
+    // rest scroll.
+    MONITORINFO monitor{};
+    monitor.cbSize = sizeof(monitor);
+    GetMonitorInfoW(MonitorFromWindow(window_, MONITOR_DEFAULTTONEAREST), &monitor);
+    const int room = monitor.rcWork.bottom - monitor.rcWork.top;
+
+    const DWORD style = static_cast<DWORD>(GetWindowLongPtrW(window_, GWL_STYLE));
+    RECT frame{0, 0, 0, 0};
+    AdjustWindowRectExForDpi(&frame, style, FALSE, 0, dpi_);
+    const int chrome_height = (frame.bottom - frame.top);
+    const int chrome_width = (frame.right - frame.left);
+
+    // Not std::clamp: on a screen short enough that the minimum height is more
+    // than the room available, its bounds would cross over, which is undefined.
+    // The minimum wins there, and the window overhangs slightly rather than
+    // becoming a sliver.
+    const int fits = std::min(content_height_, room - room / 10 - chrome_height);
+    const int height = std::max(fits, Scale(kMinHeightDip, dpi_));
+    int width = NaturalWidth() + Scale(kMarginDip, dpi_) * 2;
+    // Room for the scroll bar, so the rows are not squeezed when one appears.
+    if (height < content_height_) width += GetSystemMetricsForDpi(SM_CXVSCROLL, dpi_);
+
+    SetWindowPos(window_, nullptr, 0, 0, width + chrome_width, height + chrome_height,
+                 SWP_NOMOVE | SWP_NOZORDER | SWP_NOACTIVATE);
 }
 
 void SettingsWindow::ApplyTheme() {
@@ -700,6 +803,9 @@ void SettingsWindow::ApplyTheme() {
     DwmSetWindowAttribute(window_, DWMWA_USE_IMMERSIVE_DARK_MODE, &dark, sizeof(dark));
 
     AllowDarkModeForWindow(window_);
+    // The window's own theme is what colours the scroll bar, which is drawn by
+    // the frame rather than by anything here.
+    SetWindowTheme(window_, dark_ ? L"DarkMode_Explorer" : nullptr, nullptr);
     for (const Control& control : controls_) {
         if (!control.window) continue;
         AllowDarkModeForWindow(control.window);
@@ -1054,6 +1160,9 @@ LRESULT CALLBACK SettingsWindow::WndProc(HWND window, UINT message, WPARAM wpara
             // halves of the row, since the focus rectangle spans them.
             if (code == BN_SETFOCUS || code == BN_KILLFOCUS) {
                 if (Control* control = self->ControlFor(reinterpret_cast<HWND>(lparam))) {
+                    // Tabbing onto a row below the fold brings it into view,
+                    // or the keyboard would be driving something off screen.
+                    if (code == BN_SETFOCUS) self->EnsureVisible(control->window);
                     InvalidateRect(control->window, nullptr, TRUE);
                     if (control->partner) InvalidateRect(control->partner, nullptr, TRUE);
                 }
@@ -1077,6 +1186,13 @@ LRESULT CALLBACK SettingsWindow::WndProc(HWND window, UINT message, WPARAM wpara
                         }
                     }
                     self->Layout();
+                    // Opening a group makes the window taller if there is room
+                    // for it - but never once the window has been sized by
+                    // hand, since that size was a decision.
+                    if (!self->user_sized_) {
+                        self->SizeToContent();
+                        self->Layout();
+                    }
                     self->Refresh();
                 }
                 return 0;
@@ -1104,6 +1220,74 @@ LRESULT CALLBACK SettingsWindow::WndProc(HWND window, UINT message, WPARAM wpara
             GetClientRect(window, &client);
             FillRect(reinterpret_cast<HDC>(wparam), &client, self->background_);
             return 1;
+        }
+
+        case WM_SIZE:
+            self->Layout();
+            return 0;
+
+        case WM_EXITSIZEMOVE:
+            // Once the window has been given a size by hand, it keeps it:
+            // opening a group no longer grows the window under the pointer.
+            self->user_sized_ = true;
+            return 0;
+
+        case WM_GETMINMAXINFO: {
+            auto* limits = reinterpret_cast<MINMAXINFO*>(lparam);
+            if (!self->window_) break;
+            const DWORD style = static_cast<DWORD>(GetWindowLongPtrW(window, GWL_STYLE));
+            RECT chrome{0, 0, 0, 0};
+            AdjustWindowRectExForDpi(&chrome, style, FALSE, 0, self->dpi_);
+            const int chrome_width = chrome.right - chrome.left;
+            const int chrome_height = chrome.bottom - chrome.top;
+
+            // Narrower than this and the rows would start ellipsising; shorter
+            // than this and there is nothing left to look at.
+            limits->ptMinTrackSize.x = self->NaturalWidth() + Scale(kMarginDip, self->dpi_) * 2 +
+                                       GetSystemMetricsForDpi(SM_CXVSCROLL, self->dpi_) +
+                                       chrome_width;
+            limits->ptMinTrackSize.y = Scale(kMinHeightDip, self->dpi_) + chrome_height;
+            // No point being taller than the rows themselves.
+            limits->ptMaxTrackSize.y = self->content_height_ + chrome_height;
+            return 0;
+        }
+
+        case WM_VSCROLL: {
+            SCROLLINFO info{};
+            info.cbSize = sizeof(info);
+            info.fMask = SIF_ALL;
+            GetScrollInfo(window, SB_VERT, &info);
+            const int line = Scale(kCardHeightDip, self->dpi_) / 2;
+            int position = self->scroll_;
+            switch (LOWORD(wparam)) {
+                case SB_LINEUP: position -= line; break;
+                case SB_LINEDOWN: position += line; break;
+                case SB_PAGEUP: position -= static_cast<int>(info.nPage); break;
+                case SB_PAGEDOWN: position += static_cast<int>(info.nPage); break;
+                case SB_THUMBTRACK:
+                case SB_THUMBPOSITION: position = info.nTrackPos; break;
+                case SB_TOP: position = 0; break;
+                case SB_BOTTOM: position = self->content_height_; break;
+                default: return 0;
+            }
+            self->ScrollTo(position);
+            return 0;
+        }
+
+        case WM_MOUSEWHEEL: {
+            // A button hands the wheel up to its parent unhandled, so this is
+            // reached wherever the pointer is inside the window.
+            UINT lines = 3;
+            SystemParametersInfoW(SPI_GETWHEELSCROLLLINES, 0, &lines, 0);
+            if (lines == WHEEL_PAGESCROLL) {
+                RECT client{};
+                GetClientRect(window, &client);
+                lines = static_cast<UINT>(std::max<LONG>(client.bottom / Scale(26, self->dpi_), 1));
+            }
+            const int delta = GET_WHEEL_DELTA_WPARAM(wparam);
+            self->ScrollTo(self->scroll_ - delta * static_cast<int>(lines) *
+                                               Scale(26, self->dpi_) / WHEEL_DELTA);
+            return 0;
         }
 
         case WM_SETTINGCHANGE:

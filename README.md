@@ -308,10 +308,19 @@ states rather than a picture of some. That is the reason not to draw the whole
 window as one canvas, which would have been less code.
 
 A setting that only matters while another one is on lives inside it, behind a
-chevron, the way the Settings app nests its own. Collapsed to start with: the
-window stays short enough for a laptop screen, and the detail is there when it
-is wanted. Rows whose feature is switched off are greyed rather than hidden, so
-turning something on does not make new controls appear from nowhere.
+chevron, the way the Settings app nests its own. Collapsed to start with, and
+opening one makes the window taller when there is room for it. Rows whose
+feature is switched off are greyed rather than hidden, so turning something on
+does not make new controls appear from nowhere.
+
+**The window fits the screen it opens on.** It sizes itself to its contents,
+capped at nine tenths of the work area, and the rows scroll inside it — mouse
+wheel, scroll bar, or just tabbing, since moving the focus to a row below the
+fold brings it into view. Drag it to whatever size you like: below the width
+where the text would start ellipsising it will not go, nor below a couple of
+rows tall, nor taller than the rows themselves. Once it has been resized by
+hand it keeps that size, and opening a group scrolls rather than resizing:
+a size you chose is a decision, not a starting point.
 
 Both surfaces run through one handler: the window sends the host the same
 command ids the menu sends, and whichever one made the change, the other
