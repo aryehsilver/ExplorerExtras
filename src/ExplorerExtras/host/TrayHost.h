@@ -14,6 +14,7 @@
 #include "../core/RecentFolders.h"
 #include "../core/Settings.h"
 #include "../core/Worker.h"
+#include "../ui/SettingsWindow.h"
 
 namespace ee {
 
@@ -29,6 +30,7 @@ private:
 
     void OnCommand(UINT id);
     void ShowContextMenu();
+    void ShowSettings();
     void AddTrayIcon();
     void RemoveTrayIcon();
     void ShowBalloon(const wchar_t* title, const wchar_t* text);
@@ -42,6 +44,7 @@ private:
 
     Settings settings_;
     Worker worker_;
+    SettingsWindow settings_window_;
 
     // Rebuilt every time the tray menu opens; the command ids index into it.
     std::vector<RecentFolder> recent_;

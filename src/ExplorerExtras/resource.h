@@ -17,6 +17,7 @@
 #define IDM_FOLDER_COUNTS 40013
 #define IDM_REMEMBER_RECENT 40014
 #define IDM_CLEAR_RECENT 40015
+#define IDM_SETTINGS 40016
 
 // The recent folders themselves, one command each. A range rather than an id
 // per entry, since the list is built fresh every time the menu opens.

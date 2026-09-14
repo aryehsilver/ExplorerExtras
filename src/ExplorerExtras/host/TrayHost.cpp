@@ -6,6 +6,7 @@
 #include <cwchar>
 #include <string>
 
+#include "../core/DarkMode.h"
 #include "../core/ExplorerSession.h"
 #include "../core/Logging.h"
 #include "../core/Paths.h"
@@ -85,6 +86,11 @@ int TrayHost::RunMessageLoop() {
     BOOL result;
     while ((result = GetMessageW(&msg, nullptr, 0, 0)) != 0) {
         if (result == -1) return 1;
+        // The settings window is a window of controls rather than a dialog, so
+        // Tab, the arrow keys, Space and Escape only work if it is offered the
+        // message first.
+        const HWND settings = settings_window_.Window();
+        if (settings && IsDialogMessageW(settings, &msg)) continue;
         TranslateMessage(&msg);
         DispatchMessageW(&msg);
     }
@@ -134,46 +140,21 @@ void TrayHost::ShowContextMenu() {
     HMENU menu = CreatePopupMenu();
     if (!menu) return;
 
+    // Deliberately short. Everything that is a preference lives in the settings
+    // window now; what is left is the master switch, the folders you might want
+    // back, and the two ways out.
     AppendMenuW(menu, MF_STRING | (settings_.enabled ? MF_CHECKED : MF_UNCHECKED), IDM_ENABLED,
                 L"Enabled");
     AppendMenuW(menu, MF_SEPARATOR, 0, nullptr);
-    AppendMenuW(menu,
-                MF_STRING | (settings_.navigateUpOnDoubleClick ? MF_CHECKED : MF_UNCHECKED) |
-                    (settings_.enabled ? MF_ENABLED : MF_GRAYED),
-                IDM_NAVIGATE_UP, L"Double-click empty space to go up");
-    AppendMenuW(menu,
-                MF_STRING | (settings_.subfolderTips ? MF_CHECKED : MF_UNCHECKED) |
-                    (settings_.enabled ? MF_ENABLED : MF_GRAYED),
-                IDM_SUBFOLDER_TIPS, L"Subfolder tips on hover");
-    AppendMenuW(menu,
-                MF_STRING | (settings_.folderItemCounts ? MF_CHECKED : MF_UNCHECKED) |
-                    (settings_.enabled && settings_.subfolderTips ? MF_ENABLED : MF_GRAYED),
-                IDM_FOLDER_COUNTS, L"    Show item counts on folders");
-    AppendMenuW(menu,
-                MF_STRING | (settings_.filePreviews ? MF_CHECKED : MF_UNCHECKED) |
-                    (settings_.enabled ? MF_ENABLED : MF_GRAYED),
-                IDM_FILE_PREVIEWS, L"File previews on hover");
-    AppendMenuW(menu,
-                MF_STRING | (settings_.mediaPlayback ? MF_CHECKED : MF_UNCHECKED) |
-                    (settings_.enabled && settings_.filePreviews ? MF_ENABLED : MF_GRAYED),
-                IDM_MEDIA_PLAYBACK, L"Preview audio and video");
-    AppendMenuW(menu,
-                MF_STRING | (settings_.mediaAutoPlay ? MF_CHECKED : MF_UNCHECKED) |
-                    (settings_.enabled && settings_.filePreviews && settings_.mediaPlayback
-                         ? MF_ENABLED
-                         : MF_GRAYED),
-                IDM_MEDIA_AUTOPLAY, L"    Start playing on hover");
-    AppendMenuW(menu, MF_SEPARATOR, 0, nullptr);
     AppendRecentMenu(menu);
     AppendMenuW(menu, MF_SEPARATOR, 0, nullptr);
-    AppendMenuW(menu, MF_STRING | (settings_.runAtStartup ? MF_CHECKED : MF_UNCHECKED),
-                IDM_RUN_AT_STARTUP, L"Start with Windows");
-    AppendMenuW(menu, MF_STRING, IDM_RESET_PREVIEWS, L"Reset file previews");
-    AppendMenuW(menu, MF_STRING, IDM_OPEN_LOG, L"Show log file in Explorer");
-    AppendMenuW(menu, MF_STRING, IDM_COPY_LOG_PATH, L"Copy log path");
-    AppendMenuW(menu, MF_STRING, IDM_DIAGNOSTICS, L"Log element under pointer\tin 3s");
-    AppendMenuW(menu, MF_SEPARATOR, 0, nullptr);
+    AppendMenuW(menu, MF_STRING, IDM_SETTINGS, L"Settings");
     AppendMenuW(menu, MF_STRING, IDM_EXIT, L"Exit");
+
+    // A menu shown from a tray icon renders light unless the process says
+    // otherwise, which looks wrong beside every other menu on a dark desktop.
+    ApplyPreferredMenuTheme();
+    AllowDarkModeForWindow(window_);
 
     // Required so the menu dismisses when the user clicks elsewhere.
     SetForegroundWindow(window_);
@@ -211,19 +192,24 @@ void TrayHost::AppendRecentMenu(HMENU menu) {
             if (!recent_[i].context.empty()) text += L"\t" + recent_[i].context;
             AppendMenuW(submenu, MF_STRING, IDM_RECENT_FIRST + static_cast<UINT>(i), text.c_str());
         }
-        AppendMenuW(submenu, MF_SEPARATOR, 0, nullptr);
-        AppendMenuW(submenu, MF_STRING, IDM_CLEAR_RECENT, L"Clear the list");
     }
-    AppendMenuW(submenu, MF_SEPARATOR, 0, nullptr);
-    AppendMenuW(submenu, MF_STRING | MF_CHECKED, IDM_REMEMBER_RECENT, L"Remember recent folders");
+    // Nothing else in here: forgetting the list and turning it off are both
+    // settings, and this submenu is for going somewhere.
 
     AppendMenuW(menu, MF_POPUP, reinterpret_cast<UINT_PTR>(submenu),
                 L"Recent folders\tCtrl: open in this tab");
 }
 
+void TrayHost::ShowSettings() {
+    settings_window_.Show(instance_, window_, &settings_);
+}
+
 void TrayHost::PersistAndApply() {
     SaveSettings(settings_);
     ApplyToConfig(settings_);
+    // Whichever surface made the change, the other one should not be showing
+    // the old answer.
+    settings_window_.Refresh();
 }
 
 void TrayHost::OnCommand(UINT id) {
@@ -336,6 +322,10 @@ void TrayHost::OnCommand(UINT id) {
             Recents().Save();
             break;
 
+        case IDM_SETTINGS:
+            ShowSettings();
+            break;
+
         case IDM_EXIT:
             DestroyWindow(window_);
             window_ = nullptr;
@@ -367,10 +357,25 @@ LRESULT CALLBACK TrayHost::WndProc(HWND window, UINT message, WPARAM wparam, LPA
         case kTrayCallbackMessage:
             // With NOTIFYICON_VERSION_4 the event id arrives in the low word.
             switch (LOWORD(lparam)) {
+                // One right-click produces three notifications - button down,
+                // button up, then WM_CONTEXTMENU - and answering two of them
+                // showed the menu twice. The second TrackPopupMenu waited in
+                // the queue while the first was up, so the menu reappeared the
+                // instant a command was chosen and the first one closed: it
+                // read as a menu that would not go away.
+                //
+                // WM_CONTEXTMENU alone is the one to answer. Version 4 sends it
+                // for the keyboard's menu key as well, so nothing is lost.
                 case WM_CONTEXTMENU:
-                case WM_RBUTTONUP:
                     self->ShowContextMenu();
                     return 0;
+
+                // A left click on a tray icon is expected to open the thing.
+                case NIN_SELECT:
+                case NIN_KEYSELECT:
+                    self->ShowSettings();
+                    return 0;
+
                 default:
                     return 0;
             }

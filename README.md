@@ -16,6 +16,7 @@ notification area and starts with Windows from then on.
 | Drop files into a tip, springing folders open as you go | Implemented |
 | Type to filter an open tip | Implemented |
 | Recent folders in the tray, to get back to one you closed | Implemented |
+| A settings window, in the shape of the Windows 11 one | Implemented |
 
 ## Subfolder tips
 
@@ -62,9 +63,9 @@ as before.
 directly through Media Foundation's `IMFMediaEngine` in windowed mode — video
 renders into the preview window, audio gets a slim strip rather than a large
 black rectangle. Playback starts at half volume, since a hover should not
-startle, and stops the moment the preview closes. A second tray toggle opens
-media paused instead, for when a hover should not make a sound at all until the
-play button is pressed.
+startle, and stops the moment the preview closes. A second switch opens media
+paused instead, for when a hover should not make a sound at all until the play
+button is pressed.
 
 Media previews carry a transport strip: elapsed time, a progress bar, and time
 remaining counting down. Click the bar to seek, click the video to pause. Only
@@ -85,8 +86,8 @@ width, capped so that a long name ellipsises instead of stretching the window
 across the screen.
 
 Tips, file previews, media playback, whether media starts playing on hover, and
-the folder counts are five separate tray toggles, so any part of this can be
-turned off without losing the rest.
+the folder counts are five separate switches in the settings window, so any
+part of this can be turned off without losing the rest.
 
 Folder rows are annotated with what they hold - "8 folders, 1 file", right
 aligned and dimmed - so a busy folder is obvious before you open it. Those
@@ -273,9 +274,48 @@ which is the only useful answer to "the one I was just in".
 The list holds forty and shows a dozen. It lives in `recent.txt` beside the
 settings, which means it is a record of where you have been, in plain text, on
 your own disk - Explorer keeps one of those too, but this is a second copy.
-There is a toggle to stop it being kept and a "Clear the list" to empty it.
+Settings has a switch to stop it being kept, and a button to forget the lot.
 
 ![The tray menu showing recent folders](docs/recent-folders.png)
+
+## Settings
+
+Every option lives in a window of its own. The tray menu keeps only what you
+reach for in a hurry: the master switch, the recent folders, a way into the
+settings, and Exit.
+
+![The settings window](docs/settings.png)
+
+A context menu of fifteen checkboxes is a settings window with worse manners.
+It cannot group anything, it cannot explain anything, and it closes the moment
+you change one thing - so checking two boxes means opening it twice.
+
+The window is drawn to look like the rest of Windows 11: rounded cards, toggle
+switches, the system accent colour, Segoe UI Variable, and the same surface
+colours the Settings app uses - all of which follow the light or dark theme,
+and change with it while the window is open.
+
+**It is not WinUI.** WinUI 3 would match by default, but an unpackaged app that
+uses it needs the Windows App SDK: either every user installs a runtime first,
+or around eighty megabytes of DLLs ship beside the executable. That is a poor
+trade for one window, in an app whose whole distribution story is a single
+signed file you can download and run. So the rows are drawn by hand.
+
+Underneath, though, they are **real checkboxes and buttons** - custom drawn
+rather than replaced. Tab moves between them, Space toggles the focused one,
+the focus rectangle is real, and a screen reader sees checkboxes with check
+states rather than a picture of some. That is the reason not to draw the whole
+window as one canvas, which would have been less code.
+
+A setting that only matters while another one is on lives inside it, behind a
+chevron, the way the Settings app nests its own. Collapsed to start with: the
+window stays short enough for a laptop screen, and the detail is there when it
+is wanted. Rows whose feature is switched off are greyed rather than hidden, so
+turning something on does not make new controls appear from nowhere.
+
+Both surfaces run through one handler: the window sends the host the same
+command ids the menu sends, and whichever one made the change, the other
+redraws from the settings rather than from what was clicked.
 
 ## What it looks like
 
@@ -464,6 +504,7 @@ src/ExplorerExtras/
               PreviewHandlerHost  hosting the registered IPreviewHandler
               MediaPreview      Media Foundation playback and transport
               HighlightWindow   the tint over a tab or a row
+              SettingsWindow    every option, drawn as Windows 11 draws them
   host/       TrayHost          tray icon, menu, lifetime
               AutoStart         "start with Windows"
 ```
@@ -483,11 +524,11 @@ copy under Program Files, say.
 - Recent folders: `recent.txt`, forty at most
 - Log: `ExplorerExtras.log` (capped at 1 MiB)
 - Auto-start: `HKCU\Software\Microsoft\Windows\CurrentVersion\Run`, value
-  `ExplorerExtras`. On by default; toggle it from the tray menu.
+  `ExplorerExtras`. On by default; toggle it in Settings.
 
 ## Diagnostics
 
-Tray menu → **Log element under pointer**. It waits three seconds so you can
+Settings → **Log what is under the pointer**. It waits three seconds so you can
 move the pointer over Explorer, then writes to the log the full UI Automation
 ancestor chain at that point, and - when the pointer is over an Explorer window
 - every tab of that window: which of them Windows calls visible, and what folder
@@ -499,15 +540,26 @@ hit test was finding the crumb, so the fault was in what happened next.
 
 ## The one undocumented dependency
 
-`DarkMode.cpp` calls three uxtheme exports by ordinal (135, 136, 133) so shell
-context menus follow the system theme, as they do inside Explorer. There is no
-documented API for this.
+`DarkMode.cpp` calls three uxtheme exports by ordinal (135, 136, 133) so that
+menus follow the system theme, as they do inside Explorer — the tray menu and
+the shell context menus both. A menu shown from an ordinary Win32 process
+renders light whatever the system setting says, and there is no documented API
+for changing that.
+
+The settings window also asks for the undocumented `DarkMode_Explorer` theme
+class on its controls. That one goes through `SetWindowTheme`, which is
+documented; the class name is not.
 
 It is confined to appearance and every lookup is guarded, so if the ordinals
 move the menus render light and nothing else changes. That is the line: this is
 cosmetic and degrades to a slightly wrong colour, unlike using undocumented tab
 interfaces where the feature itself would depend on them. Delete this one file
-and its two call sites to remove the dependency entirely.
+and its call sites to remove the dependency entirely.
+
+The settings window's own colours are not theming APIs at all: the accent comes
+from the palette Explorer keeps in the registry, and the surfaces were read off
+the Settings app pixel by pixel, which is why the toggles are exactly the colour
+Windows draws its own.
 
 ## Deliberate non-goals
 

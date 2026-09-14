@@ -61,7 +61,7 @@
     </ClCompile>
     <Link>
       <SubSystem>Windows</SubSystem>
-      <AdditionalDependencies>shell32.lib;ole32.lib;gdiplus.lib;oleaut32.lib;user32.lib;gdi32.lib;comctl32.lib;dwmapi.lib;advapi32.lib;shlwapi.lib;uuid.lib;UIAutomationCore.lib;mfplat.lib;mfuuid.lib;%(AdditionalDependencies)</AdditionalDependencies>
+      <AdditionalDependencies>shell32.lib;ole32.lib;gdiplus.lib;oleaut32.lib;user32.lib;gdi32.lib;comctl32.lib;dwmapi.lib;advapi32.lib;shlwapi.lib;uuid.lib;uxtheme.lib;UIAutomationCore.lib;mfplat.lib;mfuuid.lib;%(AdditionalDependencies)</AdditionalDependencies>
     </Link>
     <Manifest>
       <AdditionalManifestFiles>app.manifest</AdditionalManifestFiles>
@@ -110,6 +110,7 @@
     <ClCompile Include="ui\AnimatedImage.cpp" />
     <ClCompile Include="ui\TipDropTarget.cpp" />
     <ClCompile Include="ui\TipWindow.cpp" />
+    <ClCompile Include="ui\SettingsWindow.cpp" />
     <ClCompile Include="host\AutoStart.cpp" />
     <ClCompile Include="host\TrayHost.cpp" />
   </ItemGroup>
@@ -138,6 +139,7 @@
     <ClInclude Include="ui\AnimatedImage.h" />
     <ClInclude Include="ui\TipDropTarget.h" />
     <ClInclude Include="ui\TipWindow.h" />
+    <ClInclude Include="ui\SettingsWindow.h" />
     <ClInclude Include="host\AutoStart.h" />
     <ClInclude Include="host\TrayHost.h" />
   </ItemGroup>
