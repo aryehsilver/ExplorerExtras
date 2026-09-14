@@ -606,7 +606,6 @@ void SettingsWindow::Layout() {
     places.reserve(controls_.size());
 
     int y = Scale(kTopMarginDip, dpi_);
-    bool first_section = true;
     size_t group = kRowCount;  // the header whose children we are inside
 
     for (size_t index = 0; index < controls_.size(); ++index) {
@@ -637,8 +636,9 @@ void SettingsWindow::Layout() {
 
         switch (row.kind) {
             case RowKind::Section: {
-                if (!first_section) y += Scale(kSectionTopDip, dpi_);
-                first_section = false;
+                // A heading gets air above it, unless it is the very first
+                // thing in the window and has nothing to be separated from.
+                if (!places.empty()) y += Scale(kSectionTopDip, dpi_);
                 places.push_back({control.window, left, y, content, Scale(kSectionHeightDip, dpi_)});
                 y += Scale(kSectionHeightDip, dpi_) + Scale(kSectionGapDip, dpi_);
                 break;
