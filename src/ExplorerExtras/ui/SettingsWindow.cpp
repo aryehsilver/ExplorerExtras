@@ -1247,8 +1247,9 @@ LRESULT CALLBACK SettingsWindow::WndProc(HWND window, UINT message, WPARAM wpara
                                        GetSystemMetricsForDpi(SM_CXVSCROLL, self->dpi_) +
                                        chrome_width;
             limits->ptMinTrackSize.y = Scale(kMinHeightDip, self->dpi_) + chrome_height;
-            // No point being taller than the rows themselves.
-            limits->ptMaxTrackSize.y = self->content_height_ + chrome_height;
+            // Taller than the rows is deliberately allowed. It looks like
+            // wasted space until a group is opened into it - and a window that
+            // cannot be given that room has to scroll every time one is.
             return 0;
         }
 

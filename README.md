@@ -318,9 +318,11 @@ capped at nine tenths of the work area, and the rows scroll inside it — mouse
 wheel, scroll bar, or just tabbing, since moving the focus to a row below the
 fold brings it into view. Drag it to whatever size you like: below the width
 where the text would start ellipsising it will not go, nor below a couple of
-rows tall, nor taller than the rows themselves. Once it has been resized by
-hand it keeps that size, and opening a group scrolls rather than resizing:
-a size you chose is a decision, not a starting point.
+rows tall, but taller than its own contents is allowed on purpose. That looks
+like wasted space until a group is opened into it, and a window that cannot be
+given the room has to scroll every time one is. Once it has been resized by
+hand it keeps that size, and opening a group no longer resizes it: a size you
+chose is a decision, not a starting point.
 
 Both surfaces run through one handler: the window sends the host the same
 command ids the menu sends, and whichever one made the change, the other
