@@ -503,6 +503,17 @@ void SubfolderTipFeature::RequestPreview(const std::wstring& path, const RECT& a
         if (opened) return;
     }
 
+    // An animated GIF has no preview handler, and its thumbnail is a single
+    // frame - often the blank one it opens on.
+    if (IsAnimatablePath(path)) {
+        LARGE_INTEGER start;
+        QueryPerformanceCounter(&start);
+        if (preview_.ShowAnimation(instance_, path, anchor)) {
+            EE_INFO(L"preview: animation for '%s' (%.0fms)", path.c_str(), ElapsedMs(start));
+            return;
+        }
+    }
+
     // A registered handler gives a scrollable PDF or syntax-highlighted code.
     // Thumbnails are the fallback, and all an image needs.
     CLSID clsid{};

@@ -16,6 +16,7 @@
 #include <functional>
 #include <string>
 
+#include "AnimatedImage.h"
 #include "MediaPreview.h"
 #include "PreviewHandlerHost.h"
 
@@ -37,6 +38,10 @@ public:
     // False when no handler is registered, or it refused, so the caller can
     // fall back to a thumbnail.
     bool ShowHandler(HINSTANCE instance, const std::wstring& path, const RECT& avoid);
+
+    // Plays an animated GIF. False for a still image or one GDI+ cannot read,
+    // so the caller falls back to the thumbnail as before.
+    bool ShowAnimation(HINSTANCE instance, const std::wstring& path, const RECT& avoid);
 
     // Plays an audio or video file. Nothing registers a preview handler for
     // media, so this drives Media Foundation directly.
@@ -76,6 +81,9 @@ private:
     // Where a window of this size should sit next to |avoid|, flipping sides
     // and nudging up when the monitor has no room.
     POINT PlaceBeside(const RECT& avoid, int width, int height) const;
+
+    void AdvanceFrame();
+    COLORREF BackgroundColour() const;
 
     RECT ContentRect() const;
     RECT ControlsRect() const;
@@ -118,6 +126,11 @@ private:
 
     PreviewHandlerHost handler_host_;
     MediaPreview media_;
+
+    // Only one of these is ever live: an animation owns bitmap_ the same way a
+    // thumbnail does, and swaps it on a timer.
+    AnimatedImage animation_;
+    int frame_ = 0;
 };
 
 }  // namespace ee

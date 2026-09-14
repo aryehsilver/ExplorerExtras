@@ -34,6 +34,11 @@ bool EnsureMediaHostClass(HINSTANCE instance) {
 }
 constexpr UINT_PTR kMediaTimerId = 1;
 constexpr UINT kMediaTickMs = 200;
+constexpr UINT_PTR kAnimationTimerId = 2;
+
+// The longest side an animation is drawn at. The same figure the thumbnails
+// use, so a GIF preview is the size of the picture it replaces.
+constexpr int kAnimationEdge = 480;
 
 // Roomy enough to actually read a page of a PDF or a screenful of code.
 constexpr int kHandlerWidthDip = 560;
@@ -45,6 +50,11 @@ constexpr int kAudioHeightDip = 8;  // no album art: the strip is the whole UI
 constexpr int kAudioArtDip = 220;
 constexpr int kControlsDip = 26;
 constexpr int kFooterDip = 38;
+
+// A preview is never narrower than its own footer, and never widened past this
+// to fit one: a long name ellipsises instead of dragging the window across the
+// screen.
+constexpr int kMaxFooterWidthDip = 420;
 
 // Transport strip layout: [button][elapsed][bar][remaining]. Fixed widths keep
 // the hit rectangles identical to what is painted, with no measuring involved.
@@ -99,7 +109,12 @@ bool PreviewWindow::EnsureClassRegistered(HINSTANCE instance) {
 void PreviewWindow::Hide() {
     // Release the handler and stop playback before the window they drew into
     // goes away - otherwise audio keeps going after the preview disappears.
-    if (window_) KillTimer(window_, kMediaTimerId);
+    if (window_) {
+        KillTimer(window_, kMediaTimerId);
+        KillTimer(window_, kAnimationTimerId);
+    }
+    animation_.Close();
+    frame_ = 0;
     // Unload, not Close: the handler object is kept alive between previews so
     // the next file of the same type reuses it instead of restarting it.
     handler_host_.Unload();
@@ -147,6 +162,11 @@ void PreviewWindow::Dismiss() {
 void PreviewWindow::Shutdown() {
     Hide();
     handler_host_.Close();
+    AnimatedImage::ShutdownDecoder();
+}
+
+COLORREF PreviewWindow::BackgroundColour() const {
+    return dark_ ? RGB(43, 43, 43) : RGB(249, 249, 249);
 }
 
 bool PreviewWindow::ContainsPoint(POINT screen_pt) const {
@@ -221,6 +241,28 @@ bool PreviewWindow::CreateFrame(HINSTANCE instance, const std::wstring& path, SI
     const DWM_WINDOW_CORNER_PREFERENCE corner = DWMWCP_ROUND;
     DwmSetWindowAttribute(window_, DWMWA_WINDOW_CORNER_PREFERENCE, &corner, sizeof(corner));
 
+    // The footer sits under the content, and a small picture is narrower than
+    // its own two lines of text - a 100 pixel GIF would cut "Modified" in half.
+    // Measured rather than assumed, and capped so a long name cannot stretch
+    // the window across the screen.
+    if (const HDC dc = GetDC(window_)) {
+        int footer_width = 0;
+        SIZE extent{};
+        const HGDIOBJ previous = SelectObject(dc, font_);
+        if (GetTextExtentPoint32W(dc, caption_.c_str(), static_cast<int>(caption_.size()), &extent)) {
+            footer_width = std::max<int>(footer_width, extent.cx);
+        }
+        SelectObject(dc, small_font_);
+        if (GetTextExtentPoint32W(dc, detail_.c_str(), static_cast<int>(detail_.size()), &extent)) {
+            footer_width = std::max<int>(footer_width, extent.cx);
+        }
+        SelectObject(dc, previous);
+        ReleaseDC(window_, dc);
+
+        content_.cx = std::max<LONG>(content_.cx,
+                                     std::min<int>(footer_width, Scale(kMaxFooterWidthDip, dpi_)));
+    }
+
     const int width = content_.cx + pad_ * 2;
     const int height = content_.cy + pad_ + controls_height_ + footer_height_;
 
@@ -267,6 +309,57 @@ bool PreviewWindow::Show(HINSTANCE instance, HBITMAP bitmap, const std::wstring&
     bitmap_size_ = SIZE{info.bmWidth, info.bmHeight};
     InvalidateRect(window_, nullptr, FALSE);
     return true;
+}
+
+bool PreviewWindow::ShowAnimation(HINSTANCE instance, const std::wstring& path, const RECT& avoid) {
+    AnimatedImage image;
+    if (!image.Open(path)) return false;  // a still, or unreadable: not ours
+
+    Hide();
+
+    // Scaled down to the thumbnail's edge, never up: a 32-pixel emoji GIF
+    // blown up to 480 is a worse picture than the one it started as.
+    const SIZE natural = image.Size();
+    SIZE content = natural;
+    const LONG longest = std::max(natural.cx, natural.cy);
+    if (longest > kAnimationEdge) {
+        content.cx = std::max<LONG>(1, natural.cx * kAnimationEdge / longest);
+        content.cy = std::max<LONG>(1, natural.cy * kAnimationEdge / longest);
+    }
+
+    if (!CreateFrame(instance, path, content, avoid, 0)) {
+        Hide();
+        return false;
+    }
+
+    animation_ = std::move(image);
+    frame_ = 0;
+    bitmap_ = animation_.RenderFrame(0, content, BackgroundColour());
+    bitmap_size_ = content;
+    if (!bitmap_) {
+        Hide();
+        return false;
+    }
+
+    SetTimer(window_, kAnimationTimerId, animation_.DelayMs(0), nullptr);
+    InvalidateRect(window_, nullptr, FALSE);
+    EE_INFO(L"preview: animating %d frames of '%s'", animation_.Frames(), path.c_str());
+    return true;
+}
+
+void PreviewWindow::AdvanceFrame() {
+    if (!window_ || animation_.Frames() <= 1) return;
+
+    frame_ = (frame_ + 1) % animation_.Frames();
+    if (HBITMAP next = animation_.RenderFrame(frame_, bitmap_size_, BackgroundColour())) {
+        if (bitmap_) DeleteObject(bitmap_);
+        bitmap_ = next;
+        const RECT content = ContentRect();
+        InvalidateRect(window_, &content, FALSE);
+    }
+    // Reset rather than run on one interval: a GIF's frames each carry their
+    // own delay, and plenty of them vary from frame to frame.
+    SetTimer(window_, kAnimationTimerId, animation_.DelayMs(frame_), nullptr);
 }
 
 bool PreviewWindow::ShowHandler(HINSTANCE instance, const std::wstring& path, const RECT& avoid) {
@@ -430,7 +523,7 @@ void PreviewWindow::OnPaint() {
     RECT client{};
     GetClientRect(window_, &client);
 
-    const COLORREF background = dark_ ? RGB(43, 43, 43) : RGB(249, 249, 249);
+    const COLORREF background = BackgroundColour();
     const COLORREF border = dark_ ? RGB(85, 85, 85) : RGB(200, 200, 200);
     const COLORREF text = dark_ ? RGB(240, 240, 240) : RGB(26, 26, 26);
     const COLORREF dim = dark_ ? RGB(155, 155, 155) : RGB(110, 110, 110);
@@ -608,6 +701,7 @@ LRESULT CALLBACK PreviewWindow::WndProc(HWND window, UINT message, WPARAM wparam
                 const RECT controls = self->ControlsRect();
                 InvalidateRect(window, &controls, FALSE);
             }
+            if (wparam == kAnimationTimerId) self->AdvanceFrame();
             return 0;
 
         default:

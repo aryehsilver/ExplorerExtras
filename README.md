@@ -46,6 +46,17 @@ which have no handler registered. Extraction runs on its own STA thread
 and would otherwise freeze the tip. Only the newest request survives; hovering
 down a list discards the ones overtaken on the way.
 
+**Animated GIFs play.** Nothing registers a preview handler for image/gif, and
+a shell thumbnail is one frame of an animation - usually the least interesting
+one, since plenty of GIFs open on a blank frame or a title card. They are
+decoded with GDI+ rather than WIC, because GIF frames are not whole pictures:
+most are a patch of changed pixels plus a disposal rule for what to do with
+what was underneath, and GDI+ applies all that and hands back composed frames.
+Each frame is shown for the delay it asks for; one asking for less than 20ms
+gets a tenth of a second, which is what browsers do with the same file. A GIF of
+a single frame is not animated at all, so it falls back to the thumbnail path
+as before.
+
 **Audio and video** have no registered preview handler, so they are played
 directly through Media Foundation's `IMFMediaEngine` in windowed mode — video
 renders into the preview window, audio gets a slim strip rather than a large
@@ -66,7 +77,11 @@ stream to paint — so it draws the track's album art directly, falling back to 
 slim strip when the file carries none.
 
 Every preview footer shows the file name, its size, and when it was created and
-last modified, in your locale's own date formats.
+last modified, in your locale's own date formats. The window is never narrower
+than those two lines: a small picture - a 100 pixel GIF, say - would otherwise
+cut the date in half, so the footer is measured and sets the floor for the
+width, capped so that a long name ellipsises instead of stretching the window
+across the screen.
 
 Tips, file previews, media playback, whether media starts playing on hover, and
 the folder counts are five separate tray toggles, so any part of this can be
