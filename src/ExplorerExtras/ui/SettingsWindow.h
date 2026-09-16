@@ -27,6 +27,8 @@
 #include <windows.h>
 #include <commctrl.h>
 
+#include <string>
+#include <utility>
 #include <vector>
 
 #include "../core/Settings.h"
@@ -52,6 +54,11 @@ public:
 
     // Redraws the rows from the settings. Cheap, and safe when nothing is open.
     void Refresh();
+
+    // Puts a line of explanation under a row, or takes it away with an empty
+    // string - for something only the host can know, such as Windows refusing
+    // to honour a setting. Safe before the window exists.
+    void SetNote(UINT command, const std::wstring& text);
 
     bool IsOpen() const { return window_ != nullptr && IsWindowVisible(window_); }
 
@@ -91,6 +98,9 @@ private:
     // Where a card's text begins: after the icon, or at the padding when the
     // row has no icon or the icon font is missing.
     int TextLeftFor(const Row& row) const;
+    // The second line of a card: the row's own, unless the host has put
+    // something more pressing there.
+    const wchar_t* NoteFor(const Row& row) const;
     Control* ControlFor(HWND window);
 
     HINSTANCE instance_ = nullptr;
@@ -116,6 +126,9 @@ private:
 
     std::vector<Control> controls_;
     std::vector<bool> expanded_;  // one per row; only the group headers matter
+    // Notes set from outside, by command id. There is never more than one or
+    // two, so a list is the whole data structure.
+    std::vector<std::pair<UINT, std::wstring>> notes_;
 };
 
 }  // namespace ee

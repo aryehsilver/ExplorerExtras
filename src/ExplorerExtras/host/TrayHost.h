@@ -31,6 +31,10 @@ private:
     void OnCommand(UINT id);
     void ShowContextMenu();
     void ShowSettings();
+    // Makes Windows' startup entry say what the settings say, and says so in
+    // the log either way.
+    void ReconcileAutoStart();
+    void UpdateStartupNote();
     void AddTrayIcon();
     void RemoveTrayIcon();
     void ShowBalloon(const wchar_t* title, const wchar_t* text);

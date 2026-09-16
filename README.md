@@ -537,6 +537,30 @@ copy under Program Files, say.
 - Auto-start: `HKCU\Software\Microsoft\Windows\CurrentVersion\Run`, value
   `ExplorerExtras`. On by default; toggle it in Settings.
 
+### When "Start with Windows" does not
+
+The setting being on is not the same as Windows agreeing to do it, and the two
+come apart in three ways. All three are checked on every start, and written to
+the log whether or not anything is wrong.
+
+**The app moved.** This is one file with no installer, so being run from
+Downloads and then put somewhere permanent is the normal course of events — and
+the Run entry still names the old place. The entry is now compared against the
+running executable and rewritten when they differ, so moving the app repairs
+itself the next time it runs.
+
+**Windows is blocking it.** Switching an app off in Settings → Startup apps
+writes to a different key that silently overrides the Run entry, which stays
+exactly as it was. That key is read now, and the setting says so instead of
+claiming everything is fine. Switching "Start with Windows" off and on clears
+it — that is the one thing that will, because it is the one time it was asked
+for. Nothing here undoes that switch on its own: turning it off was a decision.
+
+**It is running from inside the zip.** Double-clicking the executable without
+extracting it first runs it from a folder Windows invented and will delete, so
+any startup entry points at a copy with a short life. The setting says so, and
+says what to do about it.
+
 ## Diagnostics
 
 Settings → **Log what is under the pointer**. It waits three seconds so you can

@@ -456,6 +456,33 @@ bool SettingsWindow::Create(HINSTANCE instance) {
     return true;
 }
 
+const wchar_t* SettingsWindow::NoteFor(const Row& row) const {
+    for (const auto& note : notes_) {
+        if (note.first == row.command && !note.second.empty()) return note.second.c_str();
+    }
+    return row.note;
+}
+
+void SettingsWindow::SetNote(UINT command, const std::wstring& text) {
+    for (auto& note : notes_) {
+        if (note.first != command) continue;
+        if (note.second == text) return;  // nothing has changed
+        note.second = text;
+        // A row grows a line or loses one, so the whole column moves.
+        if (window_) {
+            Layout();
+            Refresh();
+        }
+        return;
+    }
+    if (text.empty()) return;
+    notes_.emplace_back(command, text);
+    if (window_) {
+        Layout();
+        Refresh();
+    }
+}
+
 int SettingsWindow::TextLeftFor(const Row& row) const {
     const bool has_icon = row.glyph != 0 && icon_font_ != nullptr;
     return Scale(has_icon ? kTextLeftDip : kCardPadDip, dpi_);
@@ -563,8 +590,9 @@ int SettingsWindow::NaturalWidth() {
                 const int furniture = TextLeftFor(row) + Scale(kStateGapDip * 2, dpi_) +
                                       TextWidth(dc, font_, L"Off") + Scale(kTrackWidthDip, dpi_) +
                                       Scale(kCardPadDip, dpi_) + chevron_width;
+                const wchar_t* note = NoteFor(row);
                 width = furniture + std::max(TextWidth(dc, font_, row.label),
-                                             row.note ? TextWidth(dc, note_font_, row.note) : 0);
+                                             note ? TextWidth(dc, note_font_, note) : 0);
                 break;
             }
             case RowKind::Buttons:
@@ -645,7 +673,8 @@ void SettingsWindow::Layout() {
             }
 
             case RowKind::Toggle: {
-                const int height = Scale(row.note ? kCardWithNoteDip : kCardHeightDip, dpi_);
+                const int height =
+                    Scale(NoteFor(row) ? kCardWithNoteDip : kCardHeightDip, dpi_);
                 if (child) {
                     control.corners = control.last_child ? (kBottomLeft | kBottomRight) : 0;
                 } else if (HasChildren(control.row_index) && expanded_[control.row_index]) {
@@ -1072,7 +1101,7 @@ void SettingsWindow::PaintCard(NMCUSTOMDRAW* custom, Control& control) {
     } else {
         wchar_t label[256]{};
         GetWindowTextW(control.window, label, ARRAYSIZE(label));
-        const wchar_t* note = control.row ? control.row->note : nullptr;
+        const wchar_t* note = control.row ? NoteFor(*control.row) : nullptr;
         const int chevron_room = control.child ? Scale(kChevronWidthDip, dpi_) : 0;
 
         // "On" or "Off" beside the switch, the way Windows labels its own.

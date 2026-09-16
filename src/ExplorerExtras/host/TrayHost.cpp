@@ -34,11 +34,7 @@ bool TrayHost::Start(HINSTANCE instance) {
     ApplyToConfig(settings_);
     Recents().Load();
 
-    // Make the registry match the saved preference. On a first run this is what
-    // registers the app to start with Windows.
-    if (IsAutoStartEnabled() != settings_.runAtStartup) {
-        SetAutoStartEnabled(settings_.runAtStartup);
-    }
+    ReconcileAutoStart();
 
     WNDCLASSEXW wc{};
     wc.cbSize = sizeof(wc);
@@ -200,7 +196,53 @@ void TrayHost::AppendRecentMenu(HMENU menu) {
                 L"Recent folders\tCtrl: open in this tab");
 }
 
+// The saved preference is what someone asked for; the registry is what Windows
+// will actually do. They come apart on their own - this app is a single file
+// that people move, and the Run entry keeps pointing at where it used to be -
+// so they are compared on every start rather than only when the switch is
+// touched.
+void TrayHost::ReconcileAutoStart() {
+    const AutoStartState startup = AutoStartStatus();
+    EE_INFO(L"auto-start: want=%d registered=%d pointsHere=%d blocked=%d temp=%d entry='%s'",
+            settings_.runAtStartup ? 1 : 0, startup.registered ? 1 : 0, startup.points_here ? 1 : 0,
+            startup.blocked ? 1 : 0, startup.temporary ? 1 : 0, startup.command.c_str());
+
+    if (settings_.runAtStartup && !(startup.registered && startup.points_here)) {
+        // Either it was never written, or this executable has moved since.
+        if (startup.registered) {
+            EE_WARN(L"the startup entry named another copy; repointing it at this one");
+        }
+        SetAutoStartEnabled(true);
+    } else if (!settings_.runAtStartup && startup.registered) {
+        SetAutoStartEnabled(false);
+    }
+
+    // Windows' own switch is left exactly as it is: turning it off is a
+    // decision, and undoing that silently would be worse than not starting.
+    // It is only said out loud, in the one place that can act on it.
+    UpdateStartupNote();
+}
+
+// The two ways a startup that says it is on will not happen, in the order they
+// need fixing: a copy that is about to be deleted cannot be rescued by any
+// amount of registry.
+void TrayHost::UpdateStartupNote() {
+    const AutoStartState startup = AutoStartStatus();
+    std::wstring note;
+    if (startup.temporary) {
+        EE_WARN(L"running from a temporary folder; the startup entry will not survive it");
+        note = L"Running from a temporary folder. Move the app somewhere permanent first.";
+    } else if (settings_.runAtStartup && startup.blocked) {
+        EE_WARN(L"Windows is blocking this in Startup apps; it will not start at sign-in");
+        note = L"Windows is blocking this in Startup apps. Switch it off and on to allow it.";
+    }
+    settings_window_.SetNote(IDM_RUN_AT_STARTUP, note);
+}
+
 void TrayHost::ShowSettings() {
+    // The state can have changed behind our back since the last look - someone
+    // may have been in Startup apps a minute ago.
+    UpdateStartupNote();
     settings_window_.Show(instance_, window_, &settings_);
 }
 
@@ -260,6 +302,10 @@ void TrayHost::OnCommand(UINT id) {
         case IDM_RUN_AT_STARTUP:
             settings_.runAtStartup = !settings_.runAtStartup;
             SetAutoStartEnabled(settings_.runAtStartup);
+            // Asking for it by hand is also the one thing that may undo the
+            // Startup apps switch: this time it was requested.
+            if (settings_.runAtStartup) ClearStartupBlock();
+            UpdateStartupNote();
             PersistAndApply();
             break;
 
