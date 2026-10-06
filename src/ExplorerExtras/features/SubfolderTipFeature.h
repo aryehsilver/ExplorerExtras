@@ -40,6 +40,10 @@ public:
     // doing something else - including clicking the tab we are hanging off.
     void OnExternalClick(POINT screen_pt);
 
+    // Inside a tip or the preview: somewhere the click is the window's own
+    // business rather than a sign the user has moved on.
+    bool OwnsPoint(POINT screen_pt) const;
+
     // A finished thumbnail. Takes ownership of |bitmap|, which may be null.
     void OnThumbnail(uint64_t token, HBITMAP bitmap);
 
@@ -91,6 +95,10 @@ private:
     bool dragging_ = false;
     bool button_down_ = false;
     POINT button_origin_{};
+    // The button went down inside a tip or the preview and is still down: the
+    // user is working in our window - selecting text, dragging a scroll bar -
+    // and nothing opens, closes or moves until they let go.
+    bool press_in_own_window_ = false;
 
     RECT source_row_{};         // the Explorer row that opened everything
     std::wstring source_path_;  // what that row points at

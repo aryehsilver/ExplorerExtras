@@ -123,6 +123,10 @@ void PreviewHandlerHost::Resize(const RECT& rect) {
     handler_->SetRect(&bounds);
 }
 
+void PreviewHandlerHost::Focus() {
+    if (handler_ && loaded_) handler_->SetFocus();
+}
+
 void PreviewHandlerHost::Unload() {
     if (!handler_ || !loaded_) return;
     handler_->Unload();

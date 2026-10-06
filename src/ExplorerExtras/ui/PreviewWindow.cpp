@@ -149,10 +149,40 @@ void PreviewWindow::Hide() {
     detail_.clear();
 }
 
+void PreviewWindow::SetActivatable(bool activatable) {
+    if (!window_) return;
+    const LONG_PTR style = GetWindowLongPtrW(window_, GWL_EXSTYLE);
+    const LONG_PTR wanted =
+        activatable ? (style & ~static_cast<LONG_PTR>(WS_EX_NOACTIVATE)) : (style | WS_EX_NOACTIVATE);
+    if (wanted != style) SetWindowLongPtrW(window_, GWL_EXSTYLE, wanted);
+}
+
+void PreviewWindow::TrackPointer(POINT screen_pt) {
+    if (!window_ || !handler_mode_ || !Visible()) return;
+    // Measured: a handler built on WebView2 answers the click's activation
+    // itself, never asking this window, and activates it - but only within
+    // this process. Windows still will not make a no-activate window the
+    // foreground, so the keyboard stays wherever it was. Dropping the style
+    // while the pointer is over the document lets that same click do what a
+    // click does anywhere else.
+    POINT client = screen_pt;
+    ScreenToClient(window_, &client);
+    const RECT content = ContentRect();
+    SetActivatable(PtInRect(&content, client) != FALSE);
+}
+
+bool PreviewWindow::CursorInContent() const {
+    POINT pt{};
+    if (!window_ || !GetCursorPos(&pt) || !ScreenToClient(window_, &pt)) return false;
+    const RECT content = ContentRect();
+    return PtInRect(&content, pt) != FALSE;
+}
+
 void PreviewWindow::Dismiss() {
     if (window_ && handler_mode_) {
         // Keep the window and the browser inside it; only drop the document.
         handler_host_.Unload();
+        SetActivatable(false);
         ShowWindow(window_, SW_HIDE);
         return;
     }
@@ -382,6 +412,7 @@ bool PreviewWindow::ShowHandler(HINSTANCE instance, const std::wstring& path, co
         GetWindowRect(window_, &current);
         const POINT at =
             PlaceBeside(avoid, current.right - current.left, current.bottom - current.top);
+        SetActivatable(false);
         SetWindowPos(window_, HWND_TOPMOST, at.x, at.y, 0, 0, SWP_NOSIZE | SWP_NOACTIVATE);
         ShowWindow(window_, SW_SHOWNOACTIVATE);  // it may have been dismissed
         InvalidateRect(window_, nullptr, FALSE);
@@ -660,7 +691,25 @@ LRESULT CALLBACK PreviewWindow::WndProc(HWND window, UINT message, WPARAM wparam
 
     switch (message) {
         case WM_MOUSEACTIVATE:
+            // Passed up from the handler's own window, often in another
+            // process. A click in the document is the user reaching for it -
+            // to select and copy, which takes the keyboard, and a handler
+            // without focus shows no selection at all. So that click, and only
+            // that, activates the preview; showing it never does.
+            if (self->handler_mode_ && self->CursorInContent()) {
+                self->SetActivatable(true);
+                return MA_ACTIVATE;
+            }
             return MA_NOACTIVATE;
+
+        case WM_ACTIVATE:
+            // Not DefWindowProc, which would put the focus on this frame -
+            // where no key does anything - rather than in the document.
+            if (LOWORD(wparam) != WA_INACTIVE && self->handler_mode_) {
+                self->handler_host_.Focus();
+                return 0;
+            }
+            return DefWindowProcW(window, message, wparam, lparam);
 
         case WM_ERASEBKGND:
             return 1;

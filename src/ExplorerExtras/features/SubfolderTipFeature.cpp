@@ -142,6 +142,14 @@ void SubfolderTipFeature::OnTick(POINT cursor, DWORD still_ms) {
     }
 
     UpdateDragState(cursor);
+    preview_.TrackPointer(cursor);
+
+    // Wherever the pointer has wandered meanwhile: a selection overshooting the
+    // edge of a preview is still a selection, not the pointer leaving.
+    if (press_in_own_window_) {
+        outside_ms_ = 0;
+        return;
+    }
 
     // The tint follows the pointer immediately, not after the dwell - it is
     // what explains why the drop-down is about to appear.
@@ -324,8 +332,12 @@ void SubfolderTipFeature::UpdateDragState(POINT cursor) {
     if (!held) {
         dragging_ = false;
         button_down_ = false;
+        press_in_own_window_ = false;
         return;
     }
+    // Moving with the button down inside a preview is selecting text or
+    // dragging its scroll bar, not carrying something past it.
+    if (press_in_own_window_) return;
     if (!button_down_) {
         button_down_ = true;
         button_origin_ = cursor;
@@ -778,11 +790,18 @@ bool SubfolderTipFeature::PointerInsideChain(POINT screen_pt) const {
     return false;
 }
 
+bool SubfolderTipFeature::OwnsPoint(POINT screen_pt) const {
+    return PointerInsideChain(screen_pt) || preview_.ContainsPoint(screen_pt);
+}
+
 void SubfolderTipFeature::OnExternalClick(POINT screen_pt) {
     if (modal_) return;
+    // Every press comes through here first, ahead of the tick that watches the
+    // button, so this is where it is decided whose press it is.
+    press_in_own_window_ = OwnsPoint(screen_pt);
     if (chain_.empty() && !preview_.Visible()) return;
     // Our own windows handle their own clicks.
-    if (PointerInsideChain(screen_pt) || preview_.ContainsPoint(screen_pt)) return;
+    if (press_in_own_window_) return;
     Dismiss();
 }
 

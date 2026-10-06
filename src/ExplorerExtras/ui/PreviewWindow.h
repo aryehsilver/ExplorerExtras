@@ -65,6 +65,11 @@ public:
     HWND Handle() const { return window_; }
     bool ContainsPoint(POINT screen_pt) const;
 
+    // Called as the pointer moves. Over a hosted document, a click may take
+    // the keyboard - to select and copy - and so may activate the window;
+    // anywhere else nothing can. Being shown never activates it either way.
+    void TrackPointer(POINT screen_pt);
+
     using VoidFn = std::function<void()>;
     // Dragged past the system threshold: the previewed file becomes a shell
     // drag source, so it can be dropped anywhere Explorer accepts a file.
@@ -76,6 +81,11 @@ private:
 
     void OnPaint();
     void OnClick(POINT client_pt);
+    // A click in a hosted document may activate the window; nothing else may.
+    // Back to non-activating whenever the preview goes or is reused, so the
+    // next one appearing under a resting pointer takes nothing from anyone.
+    void SetActivatable(bool activatable);
+    bool CursorInContent() const;
     bool CreateFrame(HINSTANCE instance, const std::wstring& path, SIZE content, const RECT& avoid,
                      int controls_dip);
     // Where a window of this size should sit next to |avoid|, flipping sides

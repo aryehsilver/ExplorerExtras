@@ -27,7 +27,15 @@ clicking any row opens it. Moving away dismisses the chain after a short grace
 period.
 
 The popups are `WS_EX_NOACTIVATE` and answer `WM_MOUSEACTIVATE` with
-`MA_NOACTIVATE`, so Explorer never loses focus. They are per-monitor DPI aware,
+`MA_NOACTIVATE`, so Explorer never loses focus to something that merely
+appeared. The one exception is a click inside a document a preview handler is
+showing: that is the user reaching for it, to select and copy, which takes the
+keyboard. So while the pointer is over the document - and only then - the
+preview drops `WS_EX_NOACTIVATE`, the click activates it like any other window,
+and the handler is given focus. A handler built on WebView2 answers the click's
+activation itself without asking the frame, which is why the style has to
+follow the pointer rather than being decided in `WM_MOUSEACTIVATE`. When the
+preview goes, focus goes back to Explorer. They are per-monitor DPI aware,
 follow the light/dark setting, and use rounded corners on Windows 11.
 
 Detection is driven by a 60ms tick on the worker thread rather than by mouse
@@ -182,6 +190,13 @@ Explorer's automation provider stops naming its rows while it drags, so a hit
 test that comes back as a row with no name is retried a few times rather than
 written off - without that, the tip never opens mid-drag at all.
 
+A press that starts inside a tip or a preview is none of that. It is the user
+working in our window - selecting text, dragging a scroll bar - and until the
+button comes up nothing opens, closes or moves, wherever the pointer wanders.
+A selection that overshoots the edge of a preview is still a selection. A
+double-click there selects a word rather than going up a folder or closing
+anything.
+
 **Leaving** is deliberately forgiving. The pointer travelling from a row to what
 that row opened rarely goes in a straight line, and an exact hit test makes the
 popup vanish mid-journey — the common way to lose a preview is to clip the
@@ -194,7 +209,8 @@ not move the pointer out from under itself.
 
 **Right-click** any row, or the preview, for Explorer's own context menu —
 the real `IContextMenu`, so every installed shell extension is in it. **Drag**
-any row or preview and it becomes a real OLE drag source via `SHDoDragDrop`,
+any row, or a preview by its frame, and it becomes a real OLE drag source via
+`SHDoDragDrop`,
 droppable anywhere that accepts a file. Both need `OleInitialize` on the worker
 rather than plain `CoInitializeEx`, and both run modal loops that keep pumping
 our tick timer — hence the `modal_` guard, without which the tip would dismiss

@@ -145,7 +145,9 @@ LRESULT CALLBACK Worker::WndProc(HWND window, UINT message, WPARAM wparam, LPARA
                     if (event->gesture == Gesture::LeftClick) {
                         // Clicking anything that is not ours puts the tips away.
                         self->subfolder_tip_.OnExternalClick(event->pt);
-                    } else {
+                    } else if (!self->subfolder_tip_.OwnsPoint(event->pt)) {
+                        // A double-click in a preview selects a word; only one
+                        // somewhere else means the user has moved on.
                         self->subfolder_tip_.Dismiss();
                         self->navigate_up_.OnGesture(*event);
                     }

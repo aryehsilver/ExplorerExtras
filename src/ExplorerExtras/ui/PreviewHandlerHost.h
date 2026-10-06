@@ -39,6 +39,10 @@ public:
 
     bool IsOpen() const { return handler_ != nullptr; }
 
+    // Hands the keyboard to the handler's own window, the way Explorer's
+    // preview pane does when it is clicked.
+    void Focus();
+
 private:
     Microsoft::WRL::ComPtr<IPreviewHandler> handler_;
     CLSID clsid_{};      // which handler handler_ is
