@@ -25,10 +25,17 @@ constexpr UINT_PTR kDiagnosticsTimerId = 1;
 constexpr size_t kMaxRecentShown = 12;
 constexpr UINT kDiagnosticsDelayMs = 3000;
 
+// A replacement that hangs again this soon is not going to be fixed by one
+// more, and restarting in a loop is worse than staying hung.
+constexpr ULONGLONG kRestartQuietMs = 10 * 60 * 1000;
+constexpr UINT kExitStuck = 3;
+
 }  // namespace
 
-bool TrayHost::Start(HINSTANCE instance) {
+bool TrayHost::Start(HINSTANCE instance, bool replacement) {
     instance_ = instance;
+    replacement_ = replacement;
+    started_at_ = GetTickCount64();
 
     settings_ = LoadSettings();
     ApplyToConfig(settings_);
@@ -61,12 +68,20 @@ bool TrayHost::Start(HINSTANCE instance) {
     keyboard_hook_.Install(worker_.MessageWindow(), kMsgKey);
 
     AddTrayIcon();
+
+    // Both threads that matter: this one, which carries the hooks and the tray,
+    // and the worker, which carries everything that talks to Explorer.
+    watchdog_.Start({{L"main", window_}, {L"worker", worker_.MessageWindow()}},
+                    [this](const wchar_t* thread_name) { RestartAfterHang(thread_name); });
+
     EE_INFO(L"host started (enabled=%d, navigateUp=%d, autoStart=%d)", settings_.enabled ? 1 : 0,
             settings_.navigateUpOnDoubleClick ? 1 : 0, settings_.runAtStartup ? 1 : 0);
     return true;
 }
 
 void TrayHost::Stop() {
+    // First, so that waiting for the worker below is not taken for a hang.
+    watchdog_.Stop();
     keyboard_hook_.Uninstall();
     hook_.Uninstall();
     worker_.Stop();
@@ -75,6 +90,33 @@ void TrayHost::Stop() {
         DestroyWindow(window_);
         window_ = nullptr;
     }
+}
+
+void TrayHost::RestartAfterHang(const wchar_t* thread_name) {
+    if (replacement_ && GetTickCount64() - started_at_ < kRestartQuietMs) {
+        EE_WARN(L"watchdog: not restarting - this copy is itself a restart, and only %llu s old",
+                (GetTickCount64() - started_at_) / 1000);
+        return;
+    }
+
+    // Nothing here needs the stuck thread, and nothing is logged: the log's
+    // lock may be exactly what it is stuck holding. The copy that takes over
+    // says what happened, and the report above says where.
+    std::wstring command = L"\"" + ExecutablePath() + L"\" --replace " +
+                           std::to_wstring(GetCurrentProcessId()) + L" --stuck " + thread_name;
+    STARTUPINFOW startup{};
+    startup.cb = sizeof(startup);
+    PROCESS_INFORMATION process{};
+    if (!CreateProcessW(ExecutablePath().c_str(), command.data(), nullptr, nullptr, FALSE, 0,
+                        nullptr, nullptr, &startup, &process)) {
+        return;  // then Windows closes us in its own time, as it always did
+    }
+    CloseHandle(process.hThread);
+    CloseHandle(process.hProcess);
+
+    // Explorer keeps a dead process's icon until the pointer happens across it.
+    if (icon_added_) Shell_NotifyIconW(NIM_DELETE, &icon_);
+    TerminateProcess(GetCurrentProcess(), kExitStuck);
 }
 
 int TrayHost::RunMessageLoop() {

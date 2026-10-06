@@ -38,6 +38,12 @@ jobs:
           $name = "ExplorerExtras-$version-x64.zip"
           Compress-Archive -Path build\x64\Release\ExplorerExtras.exe, README.md -DestinationPath $name
           "PACKAGE=$name" | Out-File -FilePath $env:GITHUB_ENV -Append
+          # Not in the zip - nobody running the app needs it - but beside it on
+          # the release, because it is the only thing that turns the offsets in
+          # a hang report from this exact build back into function names.
+          $pdb = "ExplorerExtras-$version-x64.pdb"
+          Copy-Item build\x64\Release\ExplorerExtras.pdb $pdb
+          "SYMBOLS=$pdb" | Out-File -FilePath $env:GITHUB_ENV -Append
 
       - name: Upload build artifact
         uses: actions/upload-artifact@v7
@@ -50,4 +56,4 @@ jobs:
         shell: pwsh
         env:
           GH_TOKEN: ${{ github.token }}
-        run: gh release create $env:GITHUB_REF_NAME $env:PACKAGE --generate-notes --title $env:GITHUB_REF_NAME
+        run: gh release create $env:GITHUB_REF_NAME $env:PACKAGE $env:SYMBOLS --generate-notes --title $env:GITHUB_REF_NAME

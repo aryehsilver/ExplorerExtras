@@ -493,6 +493,21 @@ The keyboard hook is the one place anything is swallowed, and only ever a key an
 open tip is using while Explorer has focus. It swallows the matching key-up too,
 so no application is left holding a press that never ended.
 
+A third thread, the watchdog, asks the other two once a second whether they will
+take a message — the same test Windows uses to decide a program has hung. "Every
+call that can block happens on the worker" is a promise about this code, and the
+calls go into Explorer, shell extensions and preview handlers that make no such
+promise. Twice a thread here has stopped answering, and all anyone saw was the
+app gone hours later: Windows closes a hung program the next time something
+touches one of its windows, and the report it files names no thread and no
+stack.
+
+So after ten seconds without an answer the log gets which thread it is and where
+it is stuck, function by function. After thirty, a fresh copy starts and this one
+ends, so a hang costs half a minute rather than the rest of the day. A copy that
+was itself such a restart, and hangs again within ten minutes, is left alone: a
+loop of restarts is worse than one hang.
+
 ## Layout
 
 ```
@@ -572,6 +587,12 @@ each is showing.
 That is what to send if something does not open where it should. Both halves of
 the address bar bug were read straight out of one of these: the chain said the
 hit test was finding the crumb, so the fault was in what happened next.
+
+If it stopped responding, search the log for `watchdog:`. Those lines say which
+thread stopped and list where it was, innermost call first, and the copy that
+took over says which one it replaced. From a downloaded build, frames in the app
+itself read as `ExplorerExtras+0x1a2b`; the `.pdb` attached to each release
+turns those back into names.
 
 ## The one undocumented dependency
 

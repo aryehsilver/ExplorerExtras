@@ -7,12 +7,41 @@
 
 #include <windows.h>
 #include <objbase.h>
+#include <shellapi.h>
+
+#include <cstdlib>
+#include <cwchar>
+#include <string>
 
 #include "core/Logging.h"
 #include "core/Paths.h"
 #include "host/TrayHost.h"
 
 int APIENTRY wWinMain(_In_ HINSTANCE instance, _In_opt_ HINSTANCE, _In_ LPWSTR, _In_ int) {
+    // Started by the watchdog in place of a copy that hung:
+    //   --replace <pid of that copy> --stuck <which of its threads>
+    DWORD replaced_pid = 0;
+    std::wstring stuck_thread;
+    int argc = 0;
+    if (LPWSTR* argv = CommandLineToArgvW(GetCommandLineW(), &argc)) {
+        for (int i = 1; i + 1 < argc; ++i) {
+            if (wcscmp(argv[i], L"--replace") == 0) {
+                replaced_pid = wcstoul(argv[++i], nullptr, 10);
+            } else if (wcscmp(argv[i], L"--stuck") == 0) {
+                stuck_thread = argv[++i];
+            }
+        }
+        LocalFree(argv);
+    }
+    // It ends itself as soon as we are started; wait until it has, or the
+    // check below would find it still here and leave nobody running.
+    if (replaced_pid) {
+        if (HANDLE old = OpenProcess(SYNCHRONIZE, FALSE, replaced_pid)) {
+            WaitForSingleObject(old, 30000);
+            CloseHandle(old);
+        }
+    }
+
     // One instance per session; two hooks would navigate up twice.
     HANDLE single_instance = CreateMutexW(nullptr, TRUE, L"Local\\ExplorerExtras.SingleInstance");
     if (single_instance && GetLastError() == ERROR_ALREADY_EXISTS) {
@@ -26,6 +55,11 @@ int APIENTRY wWinMain(_In_ HINSTANCE instance, _In_opt_ HINSTANCE, _In_ LPWSTR, 
 
     ee::log::Init();
     EE_INFO(L"Explorer Extras starting, exe=%s", ee::ExecutablePath().c_str());
+    if (replaced_pid) {
+        EE_WARN(L"started in place of pid %lu, whose %s thread stopped responding - see the "
+                L"watchdog lines above for where",
+                replaced_pid, stuck_thread.empty() ? L"?" : stuck_thread.c_str());
+    }
 
     // The tray thread does shell work of its own - the icon, ShellExecute, and
     // enumerating what Explorer has open to build the recent folders menu - and
@@ -38,7 +72,7 @@ int APIENTRY wWinMain(_In_ HINSTANCE instance, _In_opt_ HINSTANCE, _In_ LPWSTR, 
     int exit_code = 0;
     {
         ee::TrayHost host;
-        if (host.Start(instance)) {
+        if (host.Start(instance, replaced_pid != 0)) {
             exit_code = host.RunMessageLoop();
         } else {
             EE_ERR(L"startup failed");

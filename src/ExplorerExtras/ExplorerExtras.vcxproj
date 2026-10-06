@@ -61,7 +61,7 @@
     </ClCompile>
     <Link>
       <SubSystem>Windows</SubSystem>
-      <AdditionalDependencies>shell32.lib;ole32.lib;gdiplus.lib;oleaut32.lib;user32.lib;gdi32.lib;comctl32.lib;dwmapi.lib;advapi32.lib;shlwapi.lib;uuid.lib;uxtheme.lib;UIAutomationCore.lib;mfplat.lib;mfuuid.lib;%(AdditionalDependencies)</AdditionalDependencies>
+      <AdditionalDependencies>shell32.lib;ole32.lib;gdiplus.lib;oleaut32.lib;user32.lib;gdi32.lib;comctl32.lib;dwmapi.lib;advapi32.lib;shlwapi.lib;uuid.lib;uxtheme.lib;UIAutomationCore.lib;mfplat.lib;mfuuid.lib;dbghelp.lib;%(AdditionalDependencies)</AdditionalDependencies>
     </Link>
     <Manifest>
       <AdditionalManifestFiles>app.manifest</AdditionalManifestFiles>
@@ -101,6 +101,7 @@
     <ClCompile Include="core\ShellMenu.cpp" />
     <ClCompile Include="ui\HighlightWindow.cpp" />
     <ClCompile Include="core\ViewHitTest.cpp" />
+    <ClCompile Include="core\Watchdog.cpp" />
     <ClCompile Include="core\Worker.cpp" />
     <ClCompile Include="features\NavigateUpFeature.cpp" />
     <ClCompile Include="features\SubfolderTipFeature.cpp" />
@@ -130,6 +131,7 @@
     <ClInclude Include="core\ShellMenu.h" />
     <ClInclude Include="ui\HighlightWindow.h" />
     <ClInclude Include="core\ViewHitTest.h" />
+    <ClInclude Include="core\Watchdog.h" />
     <ClInclude Include="core\Worker.h" />
     <ClInclude Include="features\NavigateUpFeature.h" />
     <ClInclude Include="features\SubfolderTipFeature.h" />

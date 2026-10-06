@@ -13,6 +13,7 @@
 #include "../core/MouseHook.h"
 #include "../core/RecentFolders.h"
 #include "../core/Settings.h"
+#include "../core/Watchdog.h"
 #include "../core/Worker.h"
 #include "../ui/SettingsWindow.h"
 
@@ -20,7 +21,9 @@ namespace ee {
 
 class TrayHost {
 public:
-    bool Start(HINSTANCE instance);
+    // |replacement| is true for a copy the watchdog started in place of one
+    // that hung.
+    bool Start(HINSTANCE instance, bool replacement);
     void Stop();
     int RunMessageLoop();
 
@@ -39,6 +42,8 @@ private:
     void RemoveTrayIcon();
     void ShowBalloon(const wchar_t* title, const wchar_t* text);
     void PersistAndApply();
+    // On the watchdog's thread, with one of ours stuck.
+    void RestartAfterHang(const wchar_t* thread_name);
 
     HINSTANCE instance_ = nullptr;
     HWND window_ = nullptr;
@@ -54,6 +59,10 @@ private:
     std::vector<RecentFolder> recent_;
     MouseHook hook_;
     KeyboardHook keyboard_hook_;
+
+    Watchdog watchdog_;
+    bool replacement_ = false;
+    ULONGLONG started_at_ = 0;
 };
 
 }  // namespace ee
