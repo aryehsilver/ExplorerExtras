@@ -430,6 +430,14 @@ Then:
 The build script stops any running instance first, since it locks the output
 binary.
 
+`-Run` starts the result through WMI rather than directly, so that it runs as
+if started from Explorer. That matters when the shell is inside a packaged app
+- Claude Desktop's terminal is one, and nothing says so. Its children get that
+app's private copy of the registry and AppData: a copy started from there
+writes its startup entry where Windows never looks, and is ended whenever that
+app restarts. Both happened here, and looked exactly like the app failing to
+start with Windows and then dying without a trace.
+
 ## How it works, and why it is built this way
 
 QTTabBar hooked Explorer from the inside: a band object loaded into

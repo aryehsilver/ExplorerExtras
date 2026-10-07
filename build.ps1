@@ -59,6 +59,16 @@ if ($LASTEXITCODE -ne 0) { throw "Build failed with exit code $LASTEXITCODE" }
 Write-Host "`nBuilt: $exe" -ForegroundColor Green
 
 if ($Run) {
-    Start-Process $exe
+    # Through WMI, not Start-Process. A shell inside a packaged app - Claude
+    # Desktop's terminal is one, and Windows does not say so - hands its
+    # children that app's private copy of the registry and AppData. A copy
+    # started from there writes its startup entry where Windows never looks,
+    # and is ended along with that app. Win32_Process.Create starts it outside
+    # any package, as if from Explorer.
+    $started = Invoke-CimMethod -ClassName Win32_Process -MethodName Create -Arguments @{
+        CommandLine      = "`"$exe`""
+        CurrentDirectory = (Split-Path $exe)
+    }
+    if ($started.ReturnValue -ne 0) { throw "Could not start it: Win32_Process.Create returned $($started.ReturnValue)" }
     Write-Host "Started. Look for the folder icon in the notification area." -ForegroundColor Green
 }
