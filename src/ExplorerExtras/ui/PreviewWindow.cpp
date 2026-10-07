@@ -432,7 +432,15 @@ bool PreviewWindow::ShowHandler(HINSTANCE instance, const std::wstring& path, co
         if (!CreateFrame(instance, path, content, avoid, 0)) return false;
     }
 
-    if (!handler_host_.Open(window_, ContentRect(), path)) {
+    // Painted before the handler is asked for anything: it keeps the thread until the
+    // document is drawn, which for a large one can be seconds, and an empty box for
+    // that long reads as broken rather than busy.
+    loading_ = true;
+    InvalidateRect(window_, nullptr, FALSE);
+    UpdateWindow(window_);
+    const bool opened = handler_host_.Open(window_, ContentRect(), path);
+    loading_ = false;
+    if (!opened) {
         Hide();
         return false;
     }
@@ -583,6 +591,15 @@ void PreviewWindow::OnPaint() {
     }
 
     SetBkMode(dc, TRANSPARENT);
+
+    if (loading_) {
+        RECT content = ContentRect();
+        const HGDIOBJ previous_font = SelectObject(dc, font_);
+        SetTextColor(dc, dim);
+        DrawTextW(dc, L"Loading preview\x2026", -1, &content,
+                  DT_CENTER | DT_VCENTER | DT_SINGLELINE | DT_NOPREFIX);
+        SelectObject(dc, previous_font);
+    }
 
     if (media_mode_) {
         double position = 0, duration = 0;

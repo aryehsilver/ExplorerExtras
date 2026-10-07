@@ -50,6 +50,11 @@ a PDF scrollable and code syntax-highlighted: none of it is reimplemented here,
 it is whatever is already installed. Move the pointer into the preview to
 scroll it; it stays open while the pointer is inside.
 
+A handler takes as long as it takes, and nothing here can hurry it: a long
+document can keep one busy for seconds. The box says "Loading preview..." until
+the handler has drawn, painted before the handler is asked for anything,
+because an empty box for that long reads as broken rather than busy.
+
 Otherwise it falls back to a shell thumbnail — images and video poster frames,
 which have no handler registered. Extraction runs on its own STA thread
 (`ThumbnailLoader`) because `GetImage` can take seconds for an uncached video

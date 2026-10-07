@@ -123,6 +123,9 @@ private:
     // WebView2 in it, and re-parenting that repeatedly is what leaves a
     // preview stuck on its loading screen.
     bool handler_mode_ = false;
+    // A handler is opening: it has the thread for as long as it takes, and the box
+    // says so meanwhile rather than sitting empty.
+    bool loading_ = false;
 
     UINT dpi_ = 96;
     int pad_ = 8;
