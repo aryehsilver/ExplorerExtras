@@ -40,6 +40,7 @@ Settings LoadSettings() {
     s.mediaAutoPlay = ReadBool(path, L"MediaAutoPlay", s.mediaAutoPlay);
     s.rememberRecentFolders = ReadBool(path, L"RememberRecentFolders", s.rememberRecentFolders);
     s.runAtStartup = ReadBool(path, L"RunAtStartup", s.runAtStartup);
+    s.startMenuShortcutMade = ReadBool(path, L"StartMenuShortcutMade", s.startMenuShortcutMade);
     return s;
 }
 
@@ -55,6 +56,7 @@ void SaveSettings(const Settings& settings) {
     WriteBool(path, L"MediaAutoPlay", settings.mediaAutoPlay);
     WriteBool(path, L"RememberRecentFolders", settings.rememberRecentFolders);
     WriteBool(path, L"RunAtStartup", settings.runAtStartup);
+    WriteBool(path, L"StartMenuShortcutMade", settings.startMenuShortcutMade);
 }
 
 RuntimeConfig& Config() {

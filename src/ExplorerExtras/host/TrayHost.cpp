@@ -12,6 +12,7 @@
 #include "../core/Paths.h"
 #include "../resource.h"
 #include "AutoStart.h"
+#include "StartMenu.h"
 
 namespace ee {
 namespace {
@@ -42,6 +43,12 @@ bool TrayHost::Start(HINSTANCE instance, bool replacement) {
     Recents().Load();
 
     ReconcileAutoStart();
+    const bool shortcut =
+        EnsureStartMenuShortcut(AutoStartStatus().temporary, settings_.startMenuShortcutMade);
+    if (shortcut != settings_.startMenuShortcutMade) {
+        settings_.startMenuShortcutMade = shortcut;
+        SaveSettings(settings_);
+    }
 
     WNDCLASSEXW wc{};
     wc.cbSize = sizeof(wc);

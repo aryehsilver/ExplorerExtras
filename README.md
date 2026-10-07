@@ -575,6 +575,11 @@ copy under Program Files, say.
 - Log: `ExplorerExtras.log` (capped at 1 MiB)
 - Auto-start: `HKCU\Software\Microsoft\Windows\CurrentVersion\Run`, value
   `ExplorerExtras`. On by default; toggle it in Settings.
+- Start menu: `Explorer Extras.lnk` in your Start menu's Programs folder, so it
+  can be found and started again after Exit. There is no installer to make it,
+  so the app does, the first time it runs, and repoints it whenever the
+  executable moves. Delete it and it stays deleted. A copy run straight out of
+  the zip leaves the Start menu alone.
 
 ### When "Start with Windows" does not
 

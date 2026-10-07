@@ -19,6 +19,9 @@ struct Settings {
     // Keep a list of folders that have been open, for the tray menu to offer.
     bool rememberRecentFolders = true;
     bool runAtStartup = true;
+    // Not an option: whether the Start menu shortcut was ever made, so one
+    // deleted by hand is not put back. See host/StartMenu.h.
+    bool startMenuShortcutMade = false;
 };
 
 Settings LoadSettings();
