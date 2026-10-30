@@ -14,6 +14,60 @@ namespace {
 // The shell extension category for preview handlers.
 constexpr wchar_t kPreviewHandlerIid[] = L"{8895b1c6-b41f-4c1c-a562-0d564250836f}";
 
+constexpr wchar_t kWebViewFolderVariable[] = L"WEBVIEW2_USER_DATA_FOLDER";
+
+// %LOCALAPPDATA%\ExplorerExtras\WebView2\{handler}, created if need be. One
+// per handler: WebView2 also refuses to share a folder between browsers
+// started with different options. Empty on failure.
+std::wstring WebViewFolder(const CLSID& clsid) {
+    PWSTR local = nullptr;
+    if (FAILED(SHGetKnownFolderPath(FOLDERID_LocalAppData, 0, nullptr, &local))) return {};
+    wchar_t id[64]{};
+    StringFromGUID2(clsid, id, ARRAYSIZE(id));
+    std::wstring folder = std::wstring(local) + L"\\ExplorerExtras\\WebView2\\" + id;
+    CoTaskMemFree(local);
+    const int created = SHCreateDirectoryExW(nullptr, folder.c_str(), nullptr);
+    if (created != ERROR_SUCCESS && created != ERROR_ALREADY_EXISTS) return {};
+    return folder;
+}
+
+// Gives a WebView2-backed handler a browser folder of its own for as long as
+// it is being called.
+//
+// These handlers pick their folder themselves - PowerToys' are under LocalLow -
+// and Explorer's preview pane runs the very same handlers at low integrity.
+// Browsers at different integrity levels cannot share a folder: whichever
+// starts second sits on its loading screen for as long as the first is open,
+// so a preview here and Explorer's own pane would each block the other.
+// WebView2 takes this variable over the folder a handler asks for, and the
+// viewer process a handler starts inherits this process's environment. The
+// variable is put back afterwards, so nothing else started from here sees it.
+class WebViewFolderScope {
+public:
+    explicit WebViewFolderScope(const CLSID& clsid) {
+        const DWORD length = GetEnvironmentVariableW(kWebViewFolderVariable, nullptr, 0);
+        if (length > 0) {
+            previous_.resize(length);
+            previous_.resize(
+                GetEnvironmentVariableW(kWebViewFolderVariable, previous_.data(), length));
+            had_previous_ = true;
+        }
+        const std::wstring folder = WebViewFolder(clsid);
+        if (!folder.empty()) SetEnvironmentVariableW(kWebViewFolderVariable, folder.c_str());
+    }
+
+    ~WebViewFolderScope() {
+        SetEnvironmentVariableW(kWebViewFolderVariable, had_previous_ ? previous_.c_str() : nullptr);
+    }
+
+    WebViewFolderScope(const WebViewFolderScope&) = delete;
+    WebViewFolderScope& operator=(const WebViewFolderScope&) = delete;
+
+private:
+    std::wstring previous_;
+    bool had_previous_ = false;
+};
+
 }  // namespace
 
 PreviewHandlerHost::~PreviewHandlerHost() {
@@ -40,6 +94,7 @@ bool PreviewHandlerHost::Open(HWND parent, const RECT& rect, const std::wstring&
         Close();
         return false;
     }
+    const WebViewFolderScope webview_folder(clsid);
 
     // A different file type needs a different handler; the current one is of
     // no further use.

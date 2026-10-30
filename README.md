@@ -55,6 +55,18 @@ document can keep one busy for seconds. The box says "Loading preview..." until
 the handler has drawn, painted before the handler is asked for anything,
 because an empty box for that long reads as broken rather than busy.
 
+A handler built on WebView2 — PowerToys' code, Markdown and SVG previews —
+is given a browser folder of its own, under
+`%LOCALAPPDATA%\ExplorerExtras\WebView2`, one per handler. Such a handler picks
+its folder itself, and Explorer's preview pane runs the same handler at low
+integrity. WebView2 cannot share a folder between browsers at different
+integrity levels, so whichever starts second sits on its own "Loading..." bar
+for as long as the other is open. A preview here would wait on Explorer's pane
+and block it in turn. WebView2 takes `WEBVIEW2_USER_DATA_FOLDER` over the folder
+the handler asks for, and the viewer process a handler starts inherits this
+process's environment. The variable is set only while the handler is being
+called, so nothing else started from here sees it.
+
 Otherwise it falls back to a shell thumbnail — images and video poster frames,
 which have no handler registered. Extraction runs on its own STA thread
 (`ThumbnailLoader`) because `GetImage` can take seconds for an uncached video
