@@ -549,6 +549,16 @@ ends, so a hang costs half a minute rather than the rest of the day. A copy that
 was itself such a restart, and hangs again within ten minutes, is left alone: a
 loop of restarts is worse than one hang.
 
+The first hang it caught was the hit test. UI Automation waits two seconds to
+connect to a window and twenty for each call by default, and a hit test makes a
+dozen calls. Over a window whose UI Automation provider had stopped answering,
+one test held the worker for 31 seconds, and the watchdog restarted the app. The
+timeouts are now half a second each; a healthy Explorer answers in 31 ms at
+most. A test that runs out of time stops there and returns "nothing here", and
+that window is left alone for five seconds rather than asked again on the next
+tick. A window Windows already counts as hung is not asked at all. Over the same
+stalled window, a test now gives up in 0.55 s.
+
 ## Layout
 
 ```

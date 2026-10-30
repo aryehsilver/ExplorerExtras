@@ -38,6 +38,21 @@ constexpr wchar_t kFirstCrumbClass[] = L"FileExplorerExtensions.FirstCrumbStackP
 // several levels in needs the names above it to say what it points at.
 constexpr int kMaxAncestors = 8;
 
+// UI Automation's own defaults wait two seconds to connect and twenty for a
+// call. Under a window that had stopped answering, one test held the worker
+// for thirty-one seconds - long enough for the watchdog to restart the app.
+// A healthy Explorer was measured answering in 31 ms at most. At a second
+// each, a stalled window still cost three, so half a second it is: that one
+// fails in 0.55 s.
+constexpr DWORD kConnectionTimeoutMs = 500;
+constexpr DWORD kTransactionTimeoutMs = 500;
+
+// A test that has taken this long has met something that is not answering.
+// It gives up rather than make the rest of its calls, and that window is left
+// alone for a while: asking again on the next tick would only wait again.
+constexpr ULONGLONG kSlowTestMs = 500;
+constexpr ULONGLONG kQuietAfterSlowMs = 5000;
+
 std::wstring GetClassNameOf(IUIAutomationElement* element) {
     BSTR raw = nullptr;
     if (FAILED(element->get_CurrentClassName(&raw)) || !raw) return {};
@@ -73,13 +88,22 @@ bool IsRejectedControlType(CONTROLTYPEID type) {
 }  // namespace
 
 HRESULT ViewHitTester::Initialize() {
-    // __uuidof(CUIAutomation) rather than CLSID_CUIAutomation: the coclass is
-    // declared in the header, so this needs no import library.
-    HRESULT hr = CoCreateInstance(__uuidof(CUIAutomation), nullptr, CLSCTX_INPROC_SERVER,
+    // __uuidof(CUIAutomation8) rather than CLSID_CUIAutomation8: the coclass is
+    // declared in the header, so this needs no import library. The 8 is what
+    // offers IUIAutomation2, and with it the timeouts.
+    HRESULT hr = CoCreateInstance(__uuidof(CUIAutomation8), nullptr, CLSCTX_INPROC_SERVER,
                                   IID_PPV_ARGS(&uia_));
     if (FAILED(hr)) {
-        EE_ERR(L"CoCreateInstance(CUIAutomation) failed, hr=0x%08X", hr);
+        EE_ERR(L"CoCreateInstance(CUIAutomation8) failed, hr=0x%08X", hr);
         return hr;
+    }
+    ComPtr<IUIAutomation2> timeouts;
+    if (SUCCEEDED(uia_.As(&timeouts)) && timeouts) {
+        timeouts->put_ConnectionTimeout(kConnectionTimeoutMs);
+        timeouts->put_TransactionTimeout(kTransactionTimeoutMs);
+    } else {
+        EE_WARN(L"UI Automation offers no timeouts; a window that stops answering can "
+                L"hold the worker");
     }
     hr = uia_->get_ControlViewWalker(&walker_);
     if (FAILED(hr)) {
@@ -96,8 +120,30 @@ void ViewHitTester::Reset() {
 }
 
 HitResult ViewHitTester::Test(POINT screen_pt) {
+    if (!uia_ || !walker_) return {};
+
+    // A window Windows already counts as not responding would only time out,
+    // and so, for a while, would one that has just been too slow.
+    const ULONGLONG start = GetTickCount64();
+    const HWND under = WindowFromPoint(screen_pt);
+    if (under && IsHungAppWindow(under)) return {};
+    if (under == slow_window_ && start < quiet_until_) return {};
+
+    HitResult result = Walk(screen_pt, start);
+    const ULONGLONG took = GetTickCount64() - start;
+    if (took >= kSlowTestMs) {
+        slow_window_ = under;
+        quiet_until_ = GetTickCount64() + kQuietAfterSlowMs;
+        EE_WARN(L"hit test: no answer from window %p in %llu ms; leaving it alone for %llu s",
+                static_cast<void*>(under), took, kQuietAfterSlowMs / 1000);
+        return {};
+    }
+    return result;
+}
+
+HitResult ViewHitTester::Walk(POINT screen_pt, ULONGLONG start) {
     HitResult result;
-    if (!uia_ || !walker_) return result;
+    const auto out_of_time = [start] { return GetTickCount64() - start >= kSlowTestMs; };
 
     ComPtr<IUIAutomationElement> element;
     if (FAILED(uia_->ElementFromPoint(screen_pt, &element)) || !element) return result;
@@ -106,7 +152,7 @@ HitResult ViewHitTester::Test(POINT screen_pt) {
     // "Name" cell, not the row - so walk up looking for whichever comes first:
     // a ListItem (on an item) or the items view (empty space).
     ComPtr<IUIAutomationElement> current = element;
-    for (int depth = 0; depth < kMaxWalkDepth && current; ++depth) {
+    for (int depth = 0; depth < kMaxWalkDepth && current && !out_of_time(); ++depth) {
         CONTROLTYPEID control_type = 0;
         current->get_CurrentControlType(&control_type);
         const std::wstring class_name = GetClassNameOf(current.Get());
@@ -151,7 +197,7 @@ HitResult ViewHitTester::Test(POINT screen_pt) {
             // Collect the trail above it, innermost first, then reverse: the
             // resolver walks down from the root.
             ComPtr<IUIAutomationElement> above = current;
-            for (int extra = 0; extra < kMaxAncestors; ++extra) {
+            for (int extra = 0; extra < kMaxAncestors && !out_of_time(); ++extra) {
                 ComPtr<IUIAutomationElement> parent;
                 if (FAILED(walker_->GetParentElement(above.Get(), &parent)) || !parent) break;
                 above = parent;
@@ -180,7 +226,7 @@ HitResult ViewHitTester::Test(POINT screen_pt) {
             // Keep climbing to the items view so callers can clamp the row to
             // what is actually on screen.
             ComPtr<IUIAutomationElement> above = current;
-            for (int extra = 0; extra < kMaxWalkDepth; ++extra) {
+            for (int extra = 0; extra < kMaxWalkDepth && !out_of_time(); ++extra) {
                 ComPtr<IUIAutomationElement> parent;
                 if (FAILED(walker_->GetParentElement(above.Get(), &parent)) || !parent) break;
                 above = parent;

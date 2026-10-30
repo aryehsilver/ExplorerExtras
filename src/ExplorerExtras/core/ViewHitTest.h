@@ -45,14 +45,20 @@ public:
     HRESULT Initialize();
     void Reset();
 
+    // None when whatever is under the point is too slow to say; see the
+    // timeouts in the .cpp.
     HitResult Test(POINT screen_pt);
 
     // Human-readable ancestor chain at a point, for the diagnostics menu item.
     std::wstring DescribeChain(POINT screen_pt);
 
 private:
+    HitResult Walk(POINT screen_pt, ULONGLONG start);
+
     Microsoft::WRL::ComPtr<IUIAutomation> uia_;
     Microsoft::WRL::ComPtr<IUIAutomationTreeWalker> walker_;
+    HWND slow_window_ = nullptr;  // the last window that was too slow to answer
+    ULONGLONG quiet_until_ = 0;   // GetTickCount64; it is not asked again before this
 };
 
 }  // namespace ee
